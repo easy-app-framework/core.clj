@@ -11,5 +11,5 @@
   (dispose [this]))
 
 (extend-protocol IDisposable
-  java.lang.AutoClosable
+  java.lang.AutoCloseable
   (dispose [this] (.close this)))

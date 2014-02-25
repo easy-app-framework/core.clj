@@ -21,7 +21,6 @@
 (defrecord CellState [value has-value channels])
 
 (deftype Cell [state]
-  "A 'future' object responsible for delivering async results"
   ICell
   (put! [this v]
     (swap! state assoc :value v :has-value true)
@@ -39,7 +38,7 @@
                     ret)))
 
 (defn make-cell []
-  (Cell. (CellState. nil false [])))
+  (Cell. (atom (CellState. nil false []))))
 
 (def Nil :easy-app/nil)
 
@@ -65,13 +64,13 @@
              ks))))
 
 (defn eval* [container k]
-  (let [{:keys [args fn async layer] :as spec} (-> container :fns k) ;; TODO: assert that cell is defined
+  (let [{:keys [args fn async layer] :as spec} (-> container :fns (get k)) ;; TODO: assert that cell is defined
         this (find-layer container layer)
         cell (make-cell)
         state (get this :state)]
     (swap! state #(if (= Nil (get % k Nil))
-                    %
-                    (assoc % k cell)))
+                    (assoc % k cell)
+                    %))
     (let [out (get @state k)]
       (when (identical? cell out)
         (go (let [val (apply fn (<! (eval-all this args)))]

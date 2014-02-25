@@ -18,7 +18,8 @@
                       (update-in [:fns] dissoc key))))
 
   ([key opt-key opt-val & {:as opts}]
-   (let [opts (assoc opts opt-key opt-val)]
+   (let [opts (assoc opts opt-key opt-val)
+         opts (merge {:args []} opts)]
      (swap! *spec* #(-> %
                         (assoc-in [:fns key] opts)
                         (update-in [:vals] dissoc key))))))
@@ -35,6 +36,8 @@
 
 (def stop! p/stop!)
 (def value p/value)
+
+(def Nil :easy-app/nil)
 
 (comment
   (define :a "a")
