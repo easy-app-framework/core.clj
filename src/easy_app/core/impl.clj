@@ -40,7 +40,7 @@
 (defn make-cell []
   (Cell. (atom (CellState. nil false []))))
 
-(def Nil :easy-app/nil)
+(def Nil :easy-app.core/nil)
 
 (defrecord Container [fns state parent layer])
 

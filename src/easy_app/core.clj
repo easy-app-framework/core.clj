@@ -37,7 +37,7 @@
 (def stop! p/stop!)
 (def value p/value)
 
-(def Nil :easy-app/nil)
+(def Nil ::nil)
 
 (comment
   (define :a "a")
