@@ -30,7 +30,7 @@
                 :args [:a :b]
                 :fn str))
     (is (= (value :a) "a"))
-    (is (= (value :ab) c/Nil))
+    (is (= (value :ab) ::c/nil))
     (is (= (eval :a) "a"))
     (is (= (eval :ab) "ab"))
     (is (= (value :ab) "ab"))))
@@ -52,7 +52,7 @@
 (deftest layers
   (with-app (defapp
               (define :a
-                :layer :app
+                :level :app
                 :fn (fn [] "a"))
               (define :b
                 :fn (fn [] "b")))
@@ -60,7 +60,7 @@
       (is (= "a" (eval :a)))
       (is (= "b" (eval :b))))
     (is (= "a" (value :a)))
-    (is (= c/Nil (value :b)))))
+    (is (= ::c/nil (value :b)))))
 
 (deftest error-handling
   (let [ex (Exception. "hello")]
@@ -76,7 +76,7 @@
 
                   (define :cell
                     :args [:async]
-                    :fn (fn [_] (throw (Exception. "Should not reach there")))))
+                    :fn (fn [_] (throw (Exception. "Should not reach here")))))
 
         (testing "Sync case"
           (let [res (eval :sync)]
@@ -88,7 +88,7 @@
             (is (= (ex-data res) {::c/container *app* ::c/cell :async}))
             (is (identical? ex (.getCause res)))))
 
-        (testing "Error in dependency is a self error"
+        (testing "Should pass errors from dependencies as-is"
           (let [res (eval :cell)]
             (is (= :async (-> res ex-data ::c/cell)))))))
 

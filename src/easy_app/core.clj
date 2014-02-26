@@ -1,15 +1,35 @@
 (ns easy-app.core
   (:refer-clojure :exclude [eval])
-  (:require [easy-app.core.protocols :as p]
-            [easy-app.core.impl :as impl]
-            [clojure.core.async :as async]))
+  (:require [clojure.core.async :as async :refer [go <!]]
+            [easy-app.core.cell :as c]
+            [easy-app.core.channel :refer [channel]])
+  (:import (java.lang Throwable)))
+
+(comment
+  (define :a "a")
+  (define :b "b")
+
+  (define :ab
+    :args [:a :b]
+    :fn #(str %1 %2))
+
+  (def app (make))
+
+  (value app :ab) ;; => ::nil
+  (<!! (eval app :ab)) ;; => "ab"
+  (value app :ab) ;; => "ab"
+  )
 
 (def ^:dynamic *spec* (atom {:fns {} :vals {}}))
+
+(defrecord Container [fns state parent level])
 
 (defn make
   ([] (make @*spec*))
   ([{:keys [fns vals]}]
-   (impl/->Container fns (atom (or vals {})) nil :app)))
+   (map->Container {:fns fns
+                    :state (atom (or vals {}))
+                    :level :app})))
 
 (defn define
   ([key val]
@@ -24,31 +44,88 @@
                         (assoc-in [:fns key] opts)
                         (update-in [:vals] dissoc key))))))
 
+(defn value [container k]
+  (let [parent (:parent container)
+        vals @(:state container)
+        val (get vals k ::nil)]
+    (if (and parent (= ::nil val))
+      (recur parent k)
+      val)))
+
+(defn find-level [container level]
+  (if (and level (not= level (:level container)))
+    (recur (:parent container) level)
+    container))
+
 (defn start
-  ([app] (start app {}))
-  ([app vals] (start app nil vals))
-  ([app layer vals] (p/start app layer vals)))
+  ([container level vals]
+   (->Container (:fns container) (atom vals) container level))
+  ([container vals]
+   (start container nil vals))
+  ([container]
+   (start container {})))
+
+(defmacro <? [ch]
+  `(let [val# (async/<! ~ch)]
+     (when (instance? Throwable val#)
+       (throw val#))
+     val#))
+
+(defmacro go* [& body]
+  `(go (try
+         ~@body
+         (catch Throwable ex#
+           ex#))))
+
+(declare eval)
+
+(defn- eval-all [container keys]
+  (go* (loop [ret []
+              [k & ks] keys]
+         (if (nil? k)
+           ret
+           (recur (conj ret (<? (eval container k)))
+                  ks)))))
+
+(defn- do-eval [container k]
+  (go* (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
+             this (find-level container level)
+             cell (c/make-cell)
+             state (get this :state)]
+
+         (when-not spec
+           (throw (ex-info (str "Cell " k " is not defined")
+                           {::container this})))
+
+         (swap! state #(if (= ::nil (get % k ::nil))
+                         (assoc % k cell)
+                         %))
+
+         (let [out (get @state k)]
+           (when (identical? cell out)
+             (let [ret (<! (go* (let [args (<? (eval-all this args))]
+                                  (try
+                                    (if async
+                                      (<? (apply fn args))
+                                      (apply fn args))
+                                    (catch Throwable ex
+                                      (throw (ex-info (str "Failed to evaluate " k)
+                                                      {::container this
+                                                       ::cell k}
+                                                      ex)))))))]
+               (swap! state assoc k ret)
+               (c/deliver cell ret)))
+           (<! (channel out))))))
 
 (defn eval
-  ([app key] (p/eval app key))
-  ([app key cb]
-   (-> (eval app key) (async/take! cb))))
-
-(def stop! p/stop!)
-(def value p/value)
-
-(def Nil ::nil)
-
-(comment
-  (define :a "a")
-  (define :b "b")
-
-  (define :ab
-    :args [:a :b]
-    :fn #(str %1 %2))
-
-  (def app (make))
-
-  (<!! (eval app :ab)) ;; => "ab"
-  (value app :ab) ;; => "ab"
-  )
+  ([this k]
+   (let [val (value this k)]
+     (if (= ::nil val)
+       (do-eval this k)
+       (channel val))))
+  ([this k cb]
+   (-> (eval this k) (async/take! cb)))
+  ([this k on-success on-failure]
+   (eval this k #(if (instance? Throwable %)
+                   (on-failure %)
+                   (on-success %)))))
