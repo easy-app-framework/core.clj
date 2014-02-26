@@ -31,8 +31,8 @@
 
 (defn eval
   ([app key] (p/eval app key))
-  ([app key val-cb]
-   (-> (eval app key) (async/take! val-cb))))
+  ([app key cb]
+   (-> (eval app key) (async/take! cb))))
 
 (def stop! p/stop!)
 (def value p/value)

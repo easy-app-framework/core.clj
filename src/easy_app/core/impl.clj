@@ -1,7 +1,8 @@
 (ns easy-app.core.impl
   (:refer-clojure :exclude [eval])
   (:require [easy-app.core.protocols :refer :all]
-            [clojure.core.async :as async :refer [go go-loop <!]]))
+            [clojure.core.async :as async :refer [go <!]])
+  (:import (java.lang Throwable)))
 
 (defprotocol IChannel
   "An object convertable to core.async channel"
@@ -55,38 +56,63 @@
     (recur (:parent container) layer)
     container))
 
+(defmacro <? [ch]
+  `(let [val# (async/<! ~ch)]
+     (when (instance? Throwable val#)
+       (throw val#))
+     val#))
+
+(defmacro go* [& body]
+  `(go (try
+         ~@body
+         (catch Throwable ex#
+           ex#))))
+
 (defn eval-all [container keys]
-  (go-loop [ret []
-           [k & ks] keys]
-    (if (nil? k)
-      ret
-      (recur (conj ret (<! (eval container k)))
-             ks))))
+  (go* (loop [ret []
+              [k & ks] keys]
+         (if (nil? k)
+           ret
+           (recur (conj ret (<? (eval container k)))
+                  ks)))))
 
 (defn eval* [container k]
-  (let [{:keys [args fn async layer] :as spec} (-> container :fns (get k)) ;; TODO: assert that cell is defined
-        this (find-layer container layer)
-        cell (make-cell)
-        state (get this :state)]
-    (swap! state #(if (= Nil (get % k Nil))
-                    (assoc % k cell)
-                    %))
-    (let [out (get @state k)]
-      (when (identical? cell out)
-        (go (let [val (apply fn (<! (eval-all this args)))]
-              (swap! state assoc k val)
-              (put! cell (if async
-                           (<! val)
-                           val)))))
-      out)))
+  (go* (let [{:keys [args fn async layer] :as spec} (-> container :fns (get k))
+             this (find-layer container layer)
+             cell (make-cell)
+             state (get this :state)]
+
+         (when-not spec
+           (throw (ex-info (str "Cell " k " is not defined")
+                           {:easy-app.core/container this})))
+
+         (swap! state #(if (= Nil (get % k Nil))
+                         (assoc % k cell)
+                         %))
+
+         (let [out (get @state k)]
+           (when (identical? cell out)
+             (let [ret (<! (go* (let [args (<? (eval-all this args))]
+                                  (try
+                                    (if async
+                                      (<? (apply fn args))
+                                      (apply fn args))
+                                    (catch Throwable ex
+                                      (throw (ex-info (str "Failed to evaluate " k)
+                                                      {:easy-app.core/container this
+                                                       :easy-app.core/cell k}
+                                                      ex)))))))]
+               (swap! state assoc k ret)
+               (put! out ret)))
+           (<! (channel out))))))
 
 (extend-type Container
   IContainer
   (value [this k] (lookup this k))
 
-  (eval [this k] (channel (let [val (lookup this k)]
-                            (if (= Nil val)
-                              (eval* this k)
-                              val))))
+  (eval [this k] (let [val (lookup this k)]
+                   (if (= Nil val)
+                     (eval* this k)
+                     (channel val))))
 
   (start [this layer vals] (Container. (:fns this) (atom vals) this layer)))
