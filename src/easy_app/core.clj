@@ -15,9 +15,7 @@
 
   (def app (make))
 
-  (value app :ab) ;; => ::nil
   (<!! (eval app :ab)) ;; => "ab"
-  (value app :ab) ;; => "ab"
   )
 
 (def ^:dynamic *spec* (atom {:fns {} :vals {}}))
@@ -44,7 +42,7 @@
                         (assoc-in [:fns key] opts)
                         (update-in [:vals] dissoc key))))))
 
-(defn value [container k]
+(defn- lookup [container k]
   (let [parent (:parent container)
         vals @(:state container)
         val (get vals k ::nil)]
@@ -52,18 +50,20 @@
       (recur parent k)
       val)))
 
-(defn find-level [container level]
-  (if (and level (not= level (:level container)))
-    (recur (:parent container) level)
-    container))
+(declare do-eval)
 
-(defn start
-  ([container level vals]
-   (->Container (:fns container) (atom vals) container level))
-  ([container vals]
-   (start container nil vals))
-  ([container]
-   (start container {})))
+(defn eval
+  ([this k]
+   (let [val (lookup this k)]
+     (if (= ::nil val)
+       (do-eval this k)
+       (channel val))))
+  ([this k cb]
+   (-> (eval this k) (async/take! cb)))
+  ([this k on-success on-failure]
+   (eval this k #(if (instance? Throwable %)
+                   (on-failure %)
+                   (on-success %)))))
 
 (defmacro <? [ch]
   `(let [val# (async/<! ~ch)]
@@ -77,8 +77,6 @@
          (catch Throwable ex#
            ex#))))
 
-(declare eval)
-
 (defn- eval-all [container keys]
   (go* (loop [ret []
               [k & ks] keys]
@@ -86,6 +84,11 @@
            ret
            (recur (conj ret (<? (eval container k)))
                   ks)))))
+
+(defn- find-level [container level]
+  (if (and level (not= level (:level container)))
+    (recur (:parent container) level)
+    container))
 
 (defn- do-eval [container k]
   (go* (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
@@ -117,15 +120,11 @@
                (c/deliver cell ret)))
            (<! (channel out))))))
 
-(defn eval
-  ([this k]
-   (let [val (value this k)]
-     (if (= ::nil val)
-       (do-eval this k)
-       (channel val))))
-  ([this k cb]
-   (-> (eval this k) (async/take! cb)))
-  ([this k on-success on-failure]
-   (eval this k #(if (instance? Throwable %)
-                   (on-failure %)
-                   (on-success %)))))
+
+(defn start
+  ([container level vals]
+   (->Container (:fns container) (atom vals) container level))
+  ([container vals]
+   (start container nil vals))
+  ([container]
+   (start container {})))

@@ -19,9 +19,6 @@
 (defn eval [k]
   (<!! (c/eval *app* k)))
 
-(defn value [k]
-  (c/value *app* k))
-
 (deftest basic
   (with-app (defapp
               (define :a "a")
@@ -29,11 +26,8 @@
               (define :ab
                 :args [:a :b]
                 :fn str))
-    (is (= (value :a) "a"))
-    (is (= (value :ab) ::c/nil))
     (is (= (eval :a) "a"))
-    (is (= (eval :ab) "ab"))
-    (is (= (value :ab) "ab"))))
+    (is (= (eval :ab) "ab"))))
 
 (deftest async-function
   (let [ch (async/chan)]
@@ -49,18 +43,27 @@
       (>!! ch "a")
       (is (= "ab" (eval :ab))))))
 
-(deftest layers
-  (with-app (defapp
-              (define :a
-                :level :app
-                :fn (fn [] "a"))
-              (define :b
-                :fn (fn [] "b")))
-    (with-app (c/start *app*)
-      (is (= "a" (eval :a)))
-      (is (= "b" (eval :b))))
-    (is (= "a" (value :a)))
-    (is (= ::c/nil (value :b)))))
+(deftest levels
+  (let [a-times (atom 0)
+        b-times (atom 0)]
+    (with-app (defapp
+                (define :a
+                  :level :app
+                  :fn (fn []
+                        (swap! a-times inc)
+                        "a"))
+                (define :b
+                  :fn (fn []
+                        (swap! b-times inc)
+                        "b")))
+      (with-app (c/start *app*)
+        (is (= "a" (eval :a)))
+        (is (= "b" (eval :b))))
+      (with-app (c/start *app*)
+        (is (= "a" (eval :a)))
+        (is (= "b" (eval :b))))
+      (is (= 1 @a-times))
+      (is (= 2 @b-times)))))
 
 (deftest error-handling
   (let [ex (Exception. "hello")]
