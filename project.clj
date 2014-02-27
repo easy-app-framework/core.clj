@@ -1,5 +1,5 @@
 (defproject easy-app/core "0.1.0-SNAPSHOT"
-  :description "FIXME: write description"
+  :description "Dependency injection for Clojure"
   :url "http://github.com/eldargab/easy-app.clj"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
