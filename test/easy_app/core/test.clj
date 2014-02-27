@@ -83,12 +83,12 @@
 
         (testing "Sync case"
           (let [res (eval :sync)]
-            (is (= (ex-data res) {::c/container *app* ::c/cell :sync}))
+            (is (= (ex-data res) {::c/level :app ::c/cell :sync}))
             (is (identical? ex (.getCause res)))))
 
         (testing "Async case"
           (let [res (eval :async)]
-            (is (= (ex-data res) {::c/container *app* ::c/cell :async}))
+            (is (= (ex-data res) {::c/level :app ::c/cell :async}))
             (is (identical? ex (.getCause res)))))
 
         (testing "Should pass errors from dependencies as-is"

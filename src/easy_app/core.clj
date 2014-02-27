@@ -3,7 +3,7 @@
   (:require [clojure.core.async :as async :refer [go <!]]
             [easy-app.core.cell :as c]
             [easy-app.core.channel :refer [channel]])
-  (:import (java.lang Throwable)))
+  (:import (java.lang Throwable IllegalArgumentException)))
 
 (comment
   (define :a "a")
@@ -97,8 +97,7 @@
              state (get this :state)]
 
          (when-not spec
-           (throw (ex-info (str "Cell " k " is not defined")
-                           {::container this})))
+           (throw (IllegalArgumentException. (str "Cell " k " is not defined"))))
 
          (swap! state #(if (= ::nil (get % k ::nil))
                          (assoc % k cell)
@@ -113,7 +112,7 @@
                                       (apply fn args))
                                     (catch Throwable ex
                                       (throw (ex-info (str "Failed to evaluate " k)
-                                                      {::container this
+                                                      {::level (:level this)
                                                        ::cell k}
                                                       ex)))))))]
                (swap! state assoc k ret)
