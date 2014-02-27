@@ -1,4 +1,4 @@
-(defproject easy-app "0.1.0-SNAPSHOT"
+(defproject easy-app/core "0.1.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://github.com/eldargab/easy-app.clj"
   :license {:name "Eclipse Public License"
