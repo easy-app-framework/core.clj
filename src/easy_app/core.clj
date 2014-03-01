@@ -18,29 +18,44 @@
   (<!! (eval app :ab)) ;; => "ab"
   )
 
-(def ^:dynamic *spec* (atom {:fns {} :vals {}}))
-
 (defrecord Container [fns state parent level])
 
-(defn make
-  ([] (make @*spec*))
-  ([{:keys [fns vals]}]
-   (map->Container {:fns fns
-                    :state (atom (or vals {}))
-                    :level :app})))
+(defrecord Fn [fn args async level])
 
-(defn define
-  ([key val]
-   (swap! *spec* #(-> %
-                      (assoc-in [:vals key] val)
-                      (update-in [:fns] dissoc key))))
+(defn- fn-entry? [[k v]]
+  (instance? Fn v))
 
-  ([key opt-key opt-val & {:as opts}]
-   (let [opts (assoc opts opt-key opt-val)
-         opts (merge {:args []} opts)]
-     (swap! *spec* #(-> %
-                        (assoc-in [:fns key] opts)
-                        (update-in [:vals] dissoc key))))))
+(defn make* [spec]
+  (map->Container {:fns (into {} (filter fn-entry? spec))
+                   :state (atom (into {} (filter (complement fn-entry?) spec)))
+                   :level :app}))
+
+(defn define*
+  ([spec k v]
+   (assoc spec k v))
+  ([spec k opt-k opt-v & {:as opts}]
+   (assoc spec k (map->Fn (merge {:args []}
+                                 (assoc opts opt-k opt-v))))))
+
+(defmacro make []
+  `(make* (and ~'*easy-app-spec*
+               @~'*easy-app-spec*)))
+
+(defmacro declare-spec []
+  `(defonce ~(with-meta '*easy-app-spec* {:dynamic true :private true})
+     (atom {})))
+
+(defmacro define [& args]
+  `(do
+     (declare-spec)
+     (swap! ~'*easy-app-spec* define* ~@args)))
+
+(defn get-ns-spec [ns]
+  (require ns)
+  (let [s (symbol (name ns) "*easy-app-spec*")]
+    (if-let [var (find-var s)]
+      (if-let [val (var-get var)]
+        @val))))
 
 (defn- lookup [container k]
   (let [parent (:parent container)

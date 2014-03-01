@@ -5,8 +5,10 @@
             [easy-app.core :as c :refer [define]])
   (:import (java.lang Exception)))
 
+(c/declare-spec)
+
 (defmacro defapp [& body]
-  `(binding [c/*spec* (atom {:fns {} :vals {}})]
+  `(binding [*easy-app-spec* (atom {})]
      ~@body
      (c/make)))
 
