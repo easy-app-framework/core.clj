@@ -37,25 +37,37 @@
    (assoc spec k (map->Fn (merge {:args []}
                                  (assoc opts opt-k opt-v))))))
 
-(defmacro make []
-  `(make* (and ~'*easy-app-spec*
-               @~'*easy-app-spec*)))
+(defn- var-get* [ns var-name]
+  (let [s (symbol (name ns) (name var-name))]
+    (when-let [var (find-var s)]
+      (var-get var))))
 
-(defmacro declare-spec []
-  `(defonce ~(with-meta '*easy-app-spec* {:dynamic true :private true})
-     (atom {})))
+(defn- get-ns-spec*
+  ([]
+   (get-ns-spec* (ns-name *ns*)))
+  ([ns]
+   (var-get* ns '*easy-app-spec*)))
 
-(defmacro define [& args]
-  `(do
-     (declare-spec)
-     (swap! ~'*easy-app-spec* define* ~@args)))
+(defn get-ns-spec [& args]
+  (when-let [spec (apply get-ns-spec* args)]
+    @spec))
 
-(defn get-ns-spec [ns]
+(defn load-ns-spec [ns]
   (require ns)
-  (let [s (symbol (name ns) "*easy-app-spec*")]
-    (if-let [var (find-var s)]
-      (if-let [val (var-get var)]
-        @val))))
+  (get-ns-spec ns))
+
+(defn make []
+  (make* (or (get-ns-spec) {})))
+
+(defn declare-spec []
+  (when-not (get-ns-spec)
+    (.setDynamic (intern *ns*
+                         (with-meta '*easy-app-spec* {:private true})
+                         (atom {})))))
+
+(defn define [& args]
+  (declare-spec)
+  (swap! (get-ns-spec*) #(apply define* % args)))
 
 (defn- lookup [container k]
   (let [parent (:parent container)
