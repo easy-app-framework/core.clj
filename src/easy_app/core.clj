@@ -154,3 +154,5 @@
    (start container nil vals))
   ([container]
    (start container {})))
+
+(defn stop! [container])
