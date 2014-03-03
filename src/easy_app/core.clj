@@ -22,52 +22,15 @@
 
 (defrecord Fn [fn args async level])
 
-(defn- fn-entry? [[k v]]
-  (instance? Fn v))
+(defn start
+  ([container level vals]
+   (->Container (:fns container) (atom vals) container level))
+  ([container vals]
+   (start container nil vals))
+  ([container]
+   (start container {})))
 
-(defn make* [spec]
-  (map->Container {:fns (into {} (filter fn-entry? spec))
-                   :state (atom (into {} (filter (complement fn-entry?) spec)))
-                   :level :app}))
-
-(defn define*
-  ([spec k v]
-   (assoc spec k v))
-  ([spec k opt-k opt-v & {:as opts}]
-   (assoc spec k (map->Fn (merge {:args []}
-                                 (assoc opts opt-k opt-v))))))
-
-(defn- var-get* [ns var-name]
-  (let [s (symbol (name ns) (name var-name))]
-    (when-let [var (find-var s)]
-      (var-get var))))
-
-(defn- get-ns-spec*
-  ([]
-   (get-ns-spec* (ns-name *ns*)))
-  ([ns]
-   (var-get* ns '*easy-app-spec*)))
-
-(defn get-ns-spec [& args]
-  (when-let [spec (apply get-ns-spec* args)]
-    @spec))
-
-(defn load-ns-spec [ns]
-  (require ns)
-  (get-ns-spec ns))
-
-(defn make []
-  (make* (or (get-ns-spec) {})))
-
-(defn declare-spec []
-  (when-not (get-ns-spec)
-    (.setDynamic (intern *ns*
-                         (with-meta '*easy-app-spec* {:private true})
-                         (atom {})))))
-
-(defn define [& args]
-  (declare-spec)
-  (swap! (get-ns-spec*) #(apply define* % args)))
+(defn stop! [container])
 
 (defn- lookup [container k]
   (let [parent (:parent container)
@@ -76,6 +39,11 @@
     (if (and parent (= ::nil val))
       (recur parent k)
       val)))
+
+(defn- find-level [container level]
+  (if (and level (not= level (:level container)))
+    (recur (:parent container) level)
+    container))
 
 (declare do-eval)
 
@@ -112,11 +80,6 @@
            (recur (conj ret (<? (eval container k)))
                   ks)))))
 
-(defn- find-level [container level]
-  (if (and level (not= level (:level container)))
-    (recur (:parent container) level)
-    container))
-
 (defn- do-eval [container k]
   (go* (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
              this (find-level container level)
@@ -146,13 +109,60 @@
                (c/deliver cell ret)))
            (<! (channel out))))))
 
+;;
+;; Spec API
+;;
 
-(defn start
-  ([container level vals]
-   (->Container (:fns container) (atom vals) container level))
-  ([container vals]
-   (start container nil vals))
-  ([container]
-   (start container {})))
+(defn- fn-entry? [[k v]]
+  (instance? Fn v))
 
-(defn stop! [container])
+(defn make* [spec]
+  (map->Container {:fns (into {} (filter fn-entry? spec))
+                   :state (atom (into {} (filter (complement fn-entry?) spec)))
+                   :level :app}))
+
+(defn define*
+  ([spec k v]
+   (assoc spec k v))
+  ([spec k opt-k opt-v & {:as opts}]
+   (assoc spec k (map->Fn (merge {:args []}
+                                 (assoc opts opt-k opt-v))))))
+
+;;
+;; Implicit per-namespace container
+;;
+
+(defn- var-get* [ns var-name]
+  (let [s (symbol (name ns) (name var-name))]
+    (when-let [var (find-var s)]
+      (var-get var))))
+
+(defn- get-ns-spec*
+  ([]
+   (get-ns-spec* (ns-name *ns*)))
+  ([ns]
+   (var-get* ns '*easy-app-spec*)))
+
+(defn get-ns-spec [& args]
+  (when-let [spec (apply get-ns-spec* args)]
+    @spec))
+
+(defn load-ns-spec [ns]
+  (require ns)
+  (get-ns-spec ns))
+
+(defn declare-spec []
+  (when-not (get-ns-spec)
+    (.setDynamic (intern *ns*
+                         (with-meta '*easy-app-spec* {:private true})
+                         (atom {})))))
+;;
+;; DSL
+;;
+
+(defn make []
+  (make* (or (get-ns-spec) {})))
+
+(defn define [& args]
+  (declare-spec)
+  (swap! (get-ns-spec*) #(apply define* % args)))
