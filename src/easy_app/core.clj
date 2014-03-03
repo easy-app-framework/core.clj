@@ -66,6 +66,12 @@
        (throw val#))
      val#))
 
+(defmacro <?! [ch]
+  `(let [val# (async/<!! ~ch)]
+     (when (instance? Throwable val#)
+       (throw val#))
+     val#))
+
 (defmacro go* [& body]
   `(go (try
          ~@body
