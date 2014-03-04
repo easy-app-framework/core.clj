@@ -6,4 +6,6 @@
   :dependencies [[org.clojure/clojure "1.5.1"]
                  [org.clojure/core.async "0.1.267.0-0d7780-alpha"]]
   :profiles {:dev {:dependencies [[criterium "0.4.3"]]
-                   :source-paths ["bench"]}})
+                   :source-paths ["bench"]
+                   :aliases {"bench" ["run" "-m" "easy-app.core.bench"]}}}
+  :jvm-opts ^:replace [])

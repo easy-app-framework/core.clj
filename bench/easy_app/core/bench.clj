@@ -48,6 +48,9 @@
   :args [:a+ :b+ :e+ :ab+ :cd+ :d+ :abcde]
   :fn +)
 
+(def app (co/make))
+(def app-state @(:state app))
+
 (defn just-a-go-block [_]
   (<?! (go* (+ 1 2))))
 
@@ -78,12 +81,11 @@
      (println "============================================================")
      (println '~fun)
      (println "============================================================")
-     (let [app# (co/make* @*easy-app-spec*)]
-       (criterium/quick-bench (~fun app#)))
+     (criterium/quick-bench (~fun (assoc app :state (atom app-state))))
      (println)))
 
 (defn -main []
-  ;; (qb just-a-go-block) ;; yields 15 mcs
+  (qb just-a-go-block)
   (qb simple-access)
   (qb calc-2-args)
   (qb calc-5-args)
