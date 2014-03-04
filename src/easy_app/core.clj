@@ -78,13 +78,20 @@
          (catch Throwable ex#
            ex#))))
 
-(defn- eval-all [container keys]
-  (go* (loop [ret []
-              [k & ks] keys]
-         (if (nil? k)
-           ret
-           (recur (conj ret (<? (eval container k)))
-                  ks)))))
+(defn- async-map [f coll]
+  (go*
+    (loop [ret []
+           coll coll]
+      (if (seq coll)
+        (recur (conj ret (<? (f (first coll))))
+               (next coll))
+        ret))))
+
+(defn- eval-args [container args]
+  (async-map #(if (= ::self %)
+                (channel container)
+                (eval container %))
+             args))
 
 (defn- do-eval [container k]
   (go* (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
@@ -101,7 +108,7 @@
 
          (let [out (get @state k)]
            (when (identical? cell out)
-             (let [ret (<! (go* (let [args (<? (eval-all this args))]
+             (let [ret (<! (go* (let [args (<? (eval-args this args))]
                                   (try
                                     (if async
                                       (<? (apply fn args))
