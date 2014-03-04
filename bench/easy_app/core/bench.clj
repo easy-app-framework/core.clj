@@ -10,11 +10,43 @@
 
 (define :ab
   :args [:a :b]
-  :fn #(+ %1 %2))
+  :fn +)
 
 (define :abcde
   :args [:a :b :c :d :e]
-  :fn #(+ %1 %2 %3 %4 %5))
+  :fn +)
+
+(define :a+
+  :args [:a]
+  :fn inc)
+
+(define :b+
+  :args [:b]
+  :fn inc)
+
+(define :c+
+  :args [:c]
+  :fn inc)
+
+(define :d+
+  :args [:b]
+  :fn inc)
+
+(define :e+
+  :args [:e]
+  :fn inc)
+
+(define :ab+
+  :args [:a+ :b+]
+  :fn +)
+
+(define :cd+
+  :args [:c+ :d+]
+  :fn +)
+
+(define :big-calc
+  :args [:a+ :b+ :e+ :ab+ :cd+ :d+ :abcde]
+  :fn +)
 
 (defn just-a-go-block [_]
   (<?! (go* (+ 1 2))))
@@ -34,6 +66,12 @@
 (defn calc-5-args-from-prev-level [app]
   (<?! (co/eval (co/start app) :abcde)))
 
+(defn big-calc [app]
+  (<?! (co/eval app :big-calc)))
+
+(defn big-calc-next-level [app]
+  (<?! (co/eval (co/start app) :big-calc)))
+
 (defmacro qb [fun]
   `(do
      (println)
@@ -50,4 +88,6 @@
   (qb calc-2-args)
   (qb calc-5-args)
   (qb start-next-level-and-access)
-  (qb calc-5-args-from-prev-level))
+  (qb calc-5-args-from-prev-level)
+  (qb big-calc)
+  (qb big-calc-next-level))
