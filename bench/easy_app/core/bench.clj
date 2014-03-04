@@ -16,24 +16,22 @@
   :args [:a :b :c :d :e]
   :fn #(+ %1 %2 %3 %4 %5))
 
-(def app (co/make))
-
-(defn just-a-go-block []
+(defn just-a-go-block [_]
   (<?! (go* (+ 1 2))))
 
-(defn simple-access []
+(defn simple-access [app]
   (<?! (co/eval app :a)))
 
-(defn calc-2-args []
+(defn calc-2-args [app]
   (<?! (co/eval app :ab)))
 
-(defn calc-5-args []
+(defn calc-5-args [app]
   (<?! (co/eval app :abcde)))
 
-(defn start-next-level-and-access []
+(defn start-next-level-and-access [app]
   (<?! (co/eval (co/start app) :a)))
 
-(defn calc-5-args-from-prev-level []
+(defn calc-5-args-from-prev-level [app]
   (<?! (co/eval (co/start app) :abcde)))
 
 (defmacro qb [fun]
@@ -42,7 +40,8 @@
      (println "============================================================")
      (println '~fun)
      (println "============================================================")
-     (criterium/quick-bench (~fun))
+     (let [app# (co/make* @*easy-app-spec*)]
+       (criterium/quick-bench (~fun app#)))
      (println)))
 
 (defn -main []
