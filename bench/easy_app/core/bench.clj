@@ -1,6 +1,7 @@
 (ns easy-app.core.bench
   (:require [criterium.core :as criterium]
-            [easy-app.core :as co :refer [define <?! go*]]))
+            [easy-app.core :as co :refer [define <?! go*]]
+            [easy-app.core.sync :as sync]))
 
 (define :a 1)
 (define :b 2)
@@ -75,6 +76,12 @@
 (defn big-calc-next-level [app]
   (<?! (co/eval (co/start app) :big-calc)))
 
+(defn sync-calc-5-args [app]
+  (sync/eval app :abcde))
+
+(defn sync-big-calc [app]
+  (sync/eval app :big-calc))
+
 (defmacro qb [fun]
   `(do
      (println)
@@ -92,4 +99,6 @@
   (qb start-next-level-and-access)
   (qb calc-5-args-from-prev-level)
   (qb big-calc)
-  (qb big-calc-next-level))
+  (qb big-calc-next-level)
+  (qb sync-calc-5-args)
+  (qb sync-big-calc))
