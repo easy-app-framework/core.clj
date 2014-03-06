@@ -1,7 +1,8 @@
 (ns easy-app.core.test
-  (:refer-clojure :exclude [eval])
+  (:refer-clojure :exclude [eval promise])
   (:require [clojure.test :refer :all]
-            [clojure.core.async :as async :refer [>!! <!!]]
+            [easy-app.async :refer :all]
+            [easy-app.async.promise :as promise]
             [easy-app.core :as c :refer [define]])
   (:import (java.lang Exception)))
 
@@ -19,7 +20,7 @@
      ~@body))
 
 (defn eval [k]
-  (<!! (c/eval *app* k)))
+  (promise/value (c/eval *app* k)))
 
 (deftest basic
   (with-app (defapp
@@ -32,17 +33,16 @@
     (is (= (eval :ab) "ab"))))
 
 (deftest async-function
-  (let [ch (async/chan)]
+  (let [p (promise/make)]
     (with-app (defapp
                 (define :a
-                  :async true
-                  :fn (fn [] ch))
+                  :fn (fn [] p))
                 (define :ab
                   :args [:a]
                   :fn (fn [a]
                         (str a "b"))))
       (c/eval *app* :ab)
-      (>!! ch "a")
+      (promise/fulfil p "a")
       (is (= "ab" (eval :ab))))))
 
 (deftest levels
@@ -75,9 +75,8 @@
                     :fn #(throw ex))
 
                   (define :async
-                    :async true
-                    :fn #(doto (async/chan)
-                           (async/put! ex)))
+                    :fn #(doto (promise/make)
+                           (promise/fulfil ex)))
 
                   (define :cell
                     :args [:async]

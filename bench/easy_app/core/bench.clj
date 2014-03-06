@@ -1,6 +1,8 @@
 (ns easy-app.core.bench
   (:require [criterium.core :as criterium]
-            [easy-app.core :as co :refer [define <?! go*]]
+            [easy-app.async.promise :as prom]
+            [easy-app.async :refer :all]
+            [easy-app.core :as co :refer [define]]
             [easy-app.core.sync :as sync]))
 
 (define :a 1)
@@ -53,28 +55,28 @@
 (def app-state @(:state app))
 
 (defn just-a-go-block [_]
-  (<?! (go* (+ 1 2))))
+  (go (+ (<? 1) (<? 2) (<? 3))))
 
 (defn simple-access [app]
-  (<?! (co/eval app :a)))
+  (prom/value (co/eval app :a)))
 
 (defn calc-2-args [app]
-  (<?! (co/eval app :ab)))
+  (prom/value (co/eval app :ab)))
 
 (defn calc-5-args [app]
-  (<?! (co/eval app :abcde)))
+  (prom/value (co/eval app :abcde)))
 
 (defn start-next-level-and-access [app]
-  (<?! (co/eval (co/start app) :a)))
+  (prom/value (co/eval (co/start app) :a)))
 
 (defn calc-5-args-from-prev-level [app]
-  (<?! (co/eval (co/start app) :abcde)))
+  (prom/value (co/eval (co/start app) :abcde)))
 
 (defn big-calc [app]
-  (<?! (co/eval app :big-calc)))
+  (prom/value (co/eval app :big-calc)))
 
 (defn big-calc-next-level [app]
-  (<?! (co/eval (co/start app) :big-calc)))
+  (prom/value (co/eval (co/start app) :big-calc)))
 
 (defn sync-calc-5-args [app]
   (sync/eval app :abcde))

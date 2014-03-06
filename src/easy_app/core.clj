@@ -1,8 +1,7 @@
 (ns easy-app.core
-  (:refer-clojure :exclude [eval])
-  (:require [clojure.core.async :as async :refer [go <!]]
-            [easy-app.core.cell :as c]
-            [easy-app.core.channel :refer [channel]])
+  (:refer-clojure :exclude [eval promise])
+  (:require [easy-app.async :refer :all]
+            [easy-app.async.promise :as promise])
   (:import (java.lang Throwable IllegalArgumentException)))
 
 (comment
@@ -15,7 +14,7 @@
 
   (def app (make))
 
-  (<!! (eval app :ab)) ;; => "ab"
+  (<?! (eval app :ab)) ;; => "ab"
   )
 
 (defrecord Container [fns state parent level])
@@ -47,39 +46,14 @@
 
 (declare do-eval)
 
-(defn eval
-  ([this k]
-   (let [val (lookup this k)]
-     (if (= ::nil val)
-       (do-eval this k)
-       (channel val))))
-  ([this k cb]
-   (-> (eval this k) (async/take! cb)))
-  ([this k on-success on-failure]
-   (eval this k #(if (instance? Throwable %)
-                   (on-failure %)
-                   (on-success %)))))
-
-(defmacro <? [ch]
-  `(let [val# (async/<! ~ch)]
-     (when (instance? Throwable val#)
-       (throw val#))
-     val#))
-
-(defmacro <?! [ch]
-  `(let [val# (async/<!! ~ch)]
-     (when (instance? Throwable val#)
-       (throw val#))
-     val#))
-
-(defmacro go* [& body]
-  `(go (try
-         ~@body
-         (catch Throwable ex#
-           ex#))))
+(defn eval [this k]
+  (let [val (lookup this k)]
+    (if (= ::nil val)
+      (do-eval this k)
+      val)))
 
 (defn- async-map [f coll]
-  (go*
+  (go
     (loop [ret []
            coll coll]
       (if (seq coll)
@@ -89,38 +63,36 @@
 
 (defn- eval-args [container args]
   (async-map #(if (= ::self %)
-                (channel container)
+                container
                 (eval container %))
              args))
 
 (defn- do-eval [container k]
-  (go* (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
-             this (find-level container level)
-             cell (c/make-cell)
-             state (get this :state)]
+  (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
+        this (find-level container level)
+        p (promise/make)
+        state (get this :state)]
 
-         (when-not spec
-           (throw (IllegalArgumentException. (str "Cell " k " is not defined"))))
-
-         (swap! state #(if (= ::nil (get % k ::nil))
-                         (assoc % k cell)
-                         %))
-
-         (let [out (get @state k)]
-           (when (identical? cell out)
-             (let [ret (<! (go* (let [args (<? (eval-args this args))]
-                                  (try
-                                    (if async
-                                      (<? (apply fn args))
-                                      (apply fn args))
-                                    (catch Throwable ex
-                                      (throw (ex-info (str "Failed to evaluate " k)
-                                                      {::level (:level this)
-                                                       ::cell k}
-                                                      ex)))))))]
-               (swap! state assoc k ret)
-               (c/deliver cell ret)))
-           (<! (channel out))))))
+    (if-not spec
+      (IllegalArgumentException. (str "Cell " k " is not defined"))
+      (do
+        (swap! state #(if (= ::nil (get % k ::nil))
+                        (assoc % k p)
+                        %))
+        (let [out (get @state k)]
+          (when (identical? p out)
+            (promise/then (go (let [args (<? (eval-args this args))]
+                                (try
+                                  (<? (apply fn args))
+                                  (catch Throwable ex
+                                    (throw (ex-info (str "Failed to evaluate " k)
+                                                    {::level (:level this)
+                                                     ::cell k}
+                                                    ex))))))
+                          #(do
+                             (swap! state assoc k %)
+                             (promise/fulfil p %))))
+          out)))))
 
 ;;
 ;; Spec API
@@ -179,3 +151,4 @@
 (defn define [& args]
   (declare-spec)
   (swap! (get-ns-spec*) #(apply define* % args)))
+
