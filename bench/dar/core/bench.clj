@@ -1,6 +1,7 @@
 (ns dar.core.bench
   (:require [criterium.core :as criterium]
             [dar.async :refer :all]
+            [dar.async.promise :refer :all]
             [dar.core :as co :refer [define]]
             [dar.core.sync :as sync]))
 
@@ -53,6 +54,9 @@
 (def app (co/make))
 (def app-state @(:state app))
 
+(defn promise-overhead [_] ;; core.async has 2.5mcs here
+  (<!! (doto (make-promise) (fulfill 1))))
+
 (defn just-a-go-block [_]
   (go 1))
 
@@ -74,9 +78,6 @@
 (defn big-calc [app]
   (<!! (co/eval app :big-calc)))
 
-(defn big-calc-next-level [app]
-  (<!! (co/eval (co/start app) :big-calc)))
-
 (defn sync-calc-5-args [app]
   (sync/eval app :abcde))
 
@@ -92,14 +93,17 @@
      (criterium/quick-bench (~fun (assoc app :state (atom app-state))))
      (println)))
 
+(defn measure-overhead [_])
+
 (defn -main []
+  (qb measure-overhead)
   (qb just-a-go-block)
+  (qb promise-overhead)
   (qb simple-access)
   (qb calc-2-args)
   (qb calc-5-args)
   (qb start-next-level-and-access)
   (qb calc-5-args-from-prev-level)
   (qb big-calc)
-  (qb big-calc-next-level)
   (qb sync-calc-5-args)
   (qb sync-big-calc))
