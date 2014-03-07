@@ -1,7 +1,7 @@
-(ns easy-app.core
+(ns dar.core
   (:refer-clojure :exclude [eval promise])
-  (:require [easy-app.async :refer :all]
-            [easy-app.async.promise :as promise])
+  (:require [dar.async :refer :all]
+            [dar.async.promise :as promise])
   (:import (java.lang Throwable IllegalArgumentException)))
 
 (comment
@@ -126,7 +126,7 @@
   ([]
    (get-ns-spec* (ns-name *ns*)))
   ([ns]
-   (var-get* ns '*easy-app-spec*)))
+   (var-get* ns '*dar-core-spec*)))
 
 (defn get-ns-spec [& args]
   (when-let [spec (apply get-ns-spec* args)]
@@ -139,7 +139,7 @@
 (defn declare-spec []
   (when-not (get-ns-spec)
     (.setDynamic (intern *ns*
-                         (with-meta '*easy-app-spec* {:private true})
+                         (with-meta '*dar-core-spec* {:private true})
                          (atom {})))))
 ;;
 ;; DSL

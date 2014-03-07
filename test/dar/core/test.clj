@@ -1,15 +1,15 @@
-(ns easy-app.core.test
+(ns dar.core.test
   (:refer-clojure :exclude [eval promise])
   (:require [clojure.test :refer :all]
-            [easy-app.async :refer :all]
-            [easy-app.async.promise :as promise]
-            [easy-app.core :as c :refer [define]])
+            [dar.async :refer :all]
+            [dar.async.promise :as promise]
+            [dar.core :as c :refer [define]])
   (:import (java.lang Exception)))
 
 (c/declare-spec)
 
 (defmacro defapp [& body]
-  `(binding [*easy-app-spec* (atom {})]
+  `(binding [*dar-core-spec* (atom {})]
      ~@body
      (c/make)))
 

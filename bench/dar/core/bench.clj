@@ -1,9 +1,9 @@
-(ns easy-app.core.bench
+(ns dar.core.bench
   (:require [criterium.core :as criterium]
-            [easy-app.async.promise :as prom]
-            [easy-app.async :refer :all]
-            [easy-app.core :as co :refer [define]]
-            [easy-app.core.sync :as sync]))
+            [dar.async.promise :as prom]
+            [dar.async :refer :all]
+            [dar.core :as co :refer [define]]
+            [dar.core.sync :as sync]))
 
 (define :a 1)
 (define :b 2)
