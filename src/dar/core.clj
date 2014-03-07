@@ -1,7 +1,7 @@
 (ns dar.core
   (:refer-clojure :exclude [eval promise])
   (:require [dar.async :refer :all]
-            [dar.async.promise :as promise])
+            [dar.async.promise :refer :all])
   (:import (java.lang Throwable IllegalArgumentException)))
 
 (comment
@@ -70,7 +70,7 @@
 (defn- do-eval [container k]
   (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
         this (find-level container level)
-        p (promise/make)
+        p (make-promise)
         state (get this :state)]
 
     (if-not spec
@@ -81,17 +81,17 @@
                         %))
         (let [out (get @state k)]
           (when (identical? p out)
-            (promise/then (go (let [args (<? (eval-args this args))]
-                                (try
-                                  (<? (apply fn args))
-                                  (catch Throwable ex
-                                    (throw (ex-info (str "Failed to evaluate " k)
-                                                    {::level (:level this)
-                                                     ::cell k}
-                                                    ex))))))
-                          #(do
-                             (swap! state assoc k %)
-                             (promise/fulfil p %))))
+            (then (go (let [args (<? (eval-args this args))]
+                        (try
+                          (<? (apply fn args))
+                          (catch Throwable ex
+                            (throw (ex-info (str "Failed to evaluate " k)
+                                            {::level (:level this)
+                                             ::cell k}
+                                            ex))))))
+                  #(do
+                     (swap! state assoc k %)
+                     (fulfill p %))))
           out)))))
 
 ;;

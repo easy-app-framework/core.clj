@@ -2,7 +2,7 @@
   (:refer-clojure :exclude [eval promise])
   (:require [clojure.test :refer :all]
             [dar.async :refer :all]
-            [dar.async.promise :as promise]
+            [dar.async.promise :refer :all]
             [dar.core :as c :refer [define]])
   (:import (java.lang Exception)))
 
@@ -20,7 +20,7 @@
      ~@body))
 
 (defn eval [k]
-  (promise/value (c/eval *app* k)))
+  (<!! (c/eval *app* k)))
 
 (deftest basic
   (with-app (defapp
@@ -33,7 +33,7 @@
     (is (= (eval :ab) "ab"))))
 
 (deftest async-function
-  (let [p (promise/make)]
+  (let [p (make-promise)]
     (with-app (defapp
                 (define :a
                   :fn (fn [] p))
@@ -42,7 +42,7 @@
                   :fn (fn [a]
                         (str a "b"))))
       (c/eval *app* :ab)
-      (promise/fulfil p "a")
+      (fulfill p "a")
       (is (= "ab" (eval :ab))))))
 
 (deftest levels
@@ -75,8 +75,8 @@
                     :fn #(throw ex))
 
                   (define :async
-                    :fn #(doto (promise/make)
-                           (promise/fulfil ex)))
+                    :fn #(doto (make-promise)
+                           (fulfill ex)))
 
                   (define :cell
                     :args [:async]

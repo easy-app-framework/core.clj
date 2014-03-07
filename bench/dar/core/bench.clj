@@ -1,6 +1,5 @@
 (ns dar.core.bench
   (:require [criterium.core :as criterium]
-            [dar.async.promise :as prom]
             [dar.async :refer :all]
             [dar.core :as co :refer [define]]
             [dar.core.sync :as sync]))
@@ -55,28 +54,28 @@
 (def app-state @(:state app))
 
 (defn just-a-go-block [_]
-  (go (+ (<? 1) (<? 2) (<? 3))))
+  (go 1))
 
 (defn simple-access [app]
-  (prom/value (co/eval app :a)))
+  (<!! (co/eval app :a)))
 
 (defn calc-2-args [app]
-  (prom/value (co/eval app :ab)))
+  (<!! (co/eval app :ab)))
 
 (defn calc-5-args [app]
-  (prom/value (co/eval app :abcde)))
+  (<!! (co/eval app :abcde)))
 
 (defn start-next-level-and-access [app]
-  (prom/value (co/eval (co/start app) :a)))
+  (<!! (co/eval (co/start app) :a)))
 
 (defn calc-5-args-from-prev-level [app]
-  (prom/value (co/eval (co/start app) :abcde)))
+  (<!! (co/eval (co/start app) :abcde)))
 
 (defn big-calc [app]
-  (prom/value (co/eval app :big-calc)))
+  (<!! (co/eval app :big-calc)))
 
 (defn big-calc-next-level [app]
-  (prom/value (co/eval (co/start app) :big-calc)))
+  (<!! (co/eval (co/start app) :big-calc)))
 
 (defn sync-calc-5-args [app]
   (sync/eval app :abcde))
