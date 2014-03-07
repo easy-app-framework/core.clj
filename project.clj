@@ -1,6 +1,6 @@
 (defproject dar/core "0.1.0-SNAPSHOT"
-  :description "Dependency injection for Clojure"
-  :url "http://github.com/eldargab/easy-app.clj"
+  :description "Dependency injection container"
+  :url "https://github.com/dar-clojure/core"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.5.1"]
