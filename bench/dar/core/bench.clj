@@ -55,28 +55,28 @@
 (def app-state @(:state app))
 
 (defn promise-overhead [_] ;; core.async has 2.5mcs here
-  (<!! (doto (make-promise) (fulfill 1))))
+  (<<! (doto (new-promise) (deliver! 1))))
 
 (defn just-a-go-block [_]
   (go 1))
 
 (defn simple-access [app]
-  (<!! (co/eval app :a)))
+  (<<! (co/eval app :a)))
 
 (defn calc-2-args [app]
-  (<!! (co/eval app :ab)))
+  (<<! (co/eval app :ab)))
 
 (defn calc-5-args [app]
-  (<!! (co/eval app :abcde)))
+  (<<! (co/eval app :abcde)))
 
 (defn start-next-level-and-access [app]
-  (<!! (co/eval (co/start app) :a)))
+  (<<! (co/eval (co/start app) :a)))
 
 (defn calc-5-args-from-prev-level [app]
-  (<!! (co/eval (co/start app) :abcde)))
+  (<<! (co/eval (co/start app) :abcde)))
 
 (defn big-calc [app]
-  (<!! (co/eval app :big-calc)))
+  (<<! (co/eval app :big-calc)))
 
 (defn sync-calc-5-args [app]
   (sync/eval app :abcde))

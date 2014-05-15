@@ -70,7 +70,7 @@
 (defn- do-eval [container k]
   (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
         this (find-level container level)
-        p (make-promise)
+        p (new-promise)
         state (get this :state)]
 
     (if-not spec
@@ -91,7 +91,7 @@
                                             ex))))))
                   #(do
                      (swap! state assoc k %)
-                     (fulfill p %))))
+                     (deliver! p %))))
           out)))))
 
 ;;

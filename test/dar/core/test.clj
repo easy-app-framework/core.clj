@@ -20,7 +20,7 @@
      ~@body))
 
 (defn eval [k]
-  (<!! (c/eval *app* k)))
+  (<<! (c/eval *app* k)))
 
 (deftest basic
   (with-app (defapp
@@ -33,7 +33,7 @@
     (is (= (eval :ab) "ab"))))
 
 (deftest async-function
-  (let [p (make-promise)]
+  (let [p (new-promise)]
     (with-app (defapp
                 (define :a
                   :fn (fn [] p))
@@ -42,7 +42,7 @@
                   :fn (fn [a]
                         (str a "b"))))
       (c/eval *app* :ab)
-      (fulfill p "a")
+      (deliver! p "a")
       (is (= "ab" (eval :ab))))))
 
 (deftest levels
@@ -75,8 +75,8 @@
                     :fn #(throw ex))
 
                   (define :async
-                    :fn #(doto (make-promise)
-                           (fulfill ex)))
+                    :fn #(doto (new-promise)
+                           (deliver! ex)))
 
                   (define :cell
                     :args [:async]
