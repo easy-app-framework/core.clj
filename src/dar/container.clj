@@ -18,7 +18,7 @@
 
 (defrecord Container [fns state parent level])
 
-(defrecord Fn [fn args async level])
+(defrecord Fn [fn args level])
 
 (defn start
   ([container level vals]
@@ -67,11 +67,10 @@
              args))
 
 (defn- do-eval [container k]
-  (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
+  (let [{:keys [args fn level] :as spec} (-> container :fns (get k))
         this (find-level container level)
         p (new-promise)
         state (get this :state)]
-
     (if-not spec
       (IllegalArgumentException. (str "Cell " k " is not defined"))
       (do
@@ -121,15 +120,18 @@
     (when-let [var (find-var s)]
       (var-get var))))
 
-(defn- get-ns-spec*
+(defn- get-ns-spec-atom
   ([]
-   (get-ns-spec* (ns-name *ns*)))
+   (get-ns-spec-atom (ns-name *ns*)))
   ([ns]
-   (var-get* ns '*dar-core-spec*)))
+   (var-get* ns '*dar-container-spec*)))
 
-(defn get-ns-spec [& args]
-  (when-let [spec (apply get-ns-spec* args)]
-    @spec))
+(defn get-ns-spec
+  ([]
+   (get-ns-spec (ns-name *ns*)))
+  ([ns]
+   (when-let [spec (get-ns-spec-atom ns)]
+     @spec)))
 
 (defn load-ns-spec [ns]
   (require ns)
@@ -138,16 +140,23 @@
 (defn declare-spec []
   (when-not (get-ns-spec)
     (.setDynamic (intern *ns*
-                         (with-meta '*dar-core-spec* {:private true})
+                         (with-meta '*dar-container-spec* {:private true})
                          (atom {})))))
 ;;
 ;; DSL
 ;;
 
-(defn make []
-  (make* (or (get-ns-spec) {})))
+(defn make
+  ([]
+   (make (ns-name *ns*)))
+  ([ns]
+   (make* (or (load-ns-spec ns) {}))))
 
 (defn define [& args]
   (declare-spec)
-  (swap! (get-ns-spec*) #(apply define* % args)))
+  (swap! (get-ns-spec-atom) #(apply define* % args)))
 
+(defn include [& namespaces]
+  (let [spec (get-ns-spec-atom)]
+    (doseq [ns namespaces]
+      (swap! spec #(merge % (load-ns-spec ns))))))

@@ -9,7 +9,7 @@
 (c/declare-spec)
 
 (defmacro defapp [& body]
-  `(binding [*dar-core-spec* (atom {})]
+  `(binding [*dar-container-spec* (atom {})]
      ~@body
      (c/make)))
 
