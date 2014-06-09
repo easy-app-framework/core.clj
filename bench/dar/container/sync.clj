@@ -1,4 +1,4 @@
-(ns dar.core.sync
+(ns dar.container.sync
   "Simplistic, fully sync implementation of eval function
   as a performance reference"
   (:refer-clojure :exclude [eval]))

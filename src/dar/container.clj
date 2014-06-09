@@ -1,8 +1,7 @@
-(ns dar.core
+(ns dar.container
   (:refer-clojure :exclude [eval promise])
   (:require [dar.async :refer :all]
-            [dar.async.promise :refer :all])
-  (:import (java.lang Throwable IllegalArgumentException)))
+            [dar.async.promise :refer :all]))
 
 (comment
   (define :a "a")

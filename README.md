@@ -1,10 +1,10 @@
-# easy-app
+# dar.container
 
 A port of [easy-app](https://github.com/eldargab/easy-app) for Clojure.
 
 ## Usage
 
-Doesn't work yet.
+Not yet released.
 
 ## License
 

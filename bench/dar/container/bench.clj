@@ -1,9 +1,9 @@
-(ns dar.core.bench
+(ns dar.container.bench
   (:require [criterium.core :as criterium]
             [dar.async :refer :all]
             [dar.async.promise :refer :all]
-            [dar.core :as co :refer [define]]
-            [dar.core.sync :as sync]))
+            [dar.container :as co :refer [define]]
+            [dar.container.sync :as sync]))
 
 (define :a 1)
 (define :b 2)
@@ -55,7 +55,7 @@
 (def app-state @(:state app))
 
 (defn promise-overhead [_] ;; core.async has 2.5mcs here
-  (<<! (doto (new-promise) (deliver! 1))))
+  (doto (new-promise) (deliver! 1)))
 
 (defn just-a-go-block [_]
   (go 1))
@@ -106,4 +106,5 @@
   (qb calc-5-args-from-prev-level)
   (qb big-calc)
   (qb sync-calc-5-args)
-  (qb sync-big-calc))
+  (qb sync-big-calc)
+  )

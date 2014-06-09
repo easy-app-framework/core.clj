@@ -1,4 +1,4 @@
-(defproject dar/core "0.1.0-SNAPSHOT"
+(defproject dar/container "0.1.0-SNAPSHOT"
   :description "Dependency injection container"
   :url "https://github.com/dar-clojure/core"
   :license {:name "Eclipse Public License"
@@ -7,5 +7,5 @@
                  [dar/async "0.1.0-SNAPSHOT"]]
   :profiles {:dev {:dependencies [[criterium "0.4.3"]]
                    :source-paths ["bench"]
-                   :aliases {"bench" ["run" "-m" "dar.core.bench"]}}}
+                   :aliases {"bench" ["run" "-m" "dar.container.bench"]}}}
    :jvm-opts ^:replace [])
