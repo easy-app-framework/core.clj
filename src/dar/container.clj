@@ -107,11 +107,13 @@
                    :state (atom (into {} (filter (complement fn-entry?) spec)))
                    :level :app}))
 
+(defn- noop [& _])
+
 (defn define*
   ([spec k v]
    (assoc spec k v))
   ([spec k opt-k opt-v & {:as opts}]
-   (assoc spec k (map->Fn (merge {:args []}
+   (assoc spec k (map->Fn (merge {:args [] :fn noop}
                                  (assoc opts opt-k opt-v))))))
 
 ;;
