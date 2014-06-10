@@ -46,7 +46,8 @@
     (doseq [task pre]
       (eval this task))
 
-    (let [ret (apply fn (map #(eval this %) args))]
+    (let [ret (apply fn (doall (for [arg args]
+                                 (eval this arg))))]
       (swap! state assoc k ret)
       ret)))
 
