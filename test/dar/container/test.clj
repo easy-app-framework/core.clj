@@ -82,7 +82,7 @@
 
 (deftest error-handling
   (let [ex (Exception. "hello")]
-    (testing "Should catch cell errors and wrap them with relevant info"
+    (testing "Should catch task errors and wrap them with relevant info"
       (with-app (defapp
                   (define :sync
                     :fn #(throw ex))
@@ -91,25 +91,25 @@
                     :fn #(doto (new-promise)
                            (deliver! ex)))
 
-                  (define :cell
+                  (define :task
                     :args [:async]
                     :fn (fn [_] (throw (Exception. "Should not reach here")))))
 
         (testing "Sync case"
           (let [res (eval :sync)]
-            (is (= (ex-data res) {::c/level :app ::c/cell :sync}))
+            (is (= (ex-data res) {::c/level :app ::c/task :sync}))
             (is (identical? ex (.getCause res)))))
 
         (testing "Async case"
           (let [res (eval :async)]
-            (is (= (ex-data res) {::c/level :app ::c/cell :async}))
+            (is (= (ex-data res) {::c/level :app ::c/task :async}))
             (is (identical? ex (.getCause res)))))
 
         (testing "Should pass errors from dependencies as-is"
-          (let [res (eval :cell)]
-            (is (= :async (-> res ex-data ::c/cell)))))))
+          (let [res (eval :task)]
+            (is (= :async (-> res ex-data ::c/task)))))))
 
-    (testing "Should not attempt to evaluate cells with errors twice"
+    (testing "Should not attempt to evaluate tasks with errors twice"
       (let [a-times (atom 0)
             ab-times (atom 0)]
         (with-app (defapp

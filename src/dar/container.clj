@@ -72,7 +72,7 @@
         p (new-promise)
         state (get this :state)]
     (if-not spec
-      (IllegalArgumentException. (str "Cell " k " is not defined"))
+      (IllegalArgumentException. (str "Task " k " is not defined"))
       (do
         (swap! state #(if (= ::nil (get % k ::nil))
                         (assoc % k p)
@@ -88,7 +88,7 @@
                           (catch Throwable ex
                             (throw (ex-info (str "Failed to evaluate " k)
                                             {::level (:level this)
-                                             ::cell k}
+                                             ::task k}
                                             ex))))))
                   #(do
                      (swap! state assoc k %)

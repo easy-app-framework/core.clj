@@ -41,7 +41,7 @@
         state (get this :state)]
 
     (when-not spec
-      (throw (js/Error. (str "Cell " k " is not defined"))))
+      (throw (js/Error. (str "Task " k " is not defined"))))
 
     (doseq [task pre]
       (eval this task))
