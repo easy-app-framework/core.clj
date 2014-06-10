@@ -67,6 +67,19 @@
       (is (= 1 @a-times))
       (is (= 2 @b-times)))))
 
+(deftest pre-tasks
+  (let [a-called (atom false)
+        b-called (atom false)]
+    (with-app (defapp
+                (define :a :fn #(reset! a-called true))
+                (define :b :fn #(reset! b-called true))
+                (define :c
+                  :pre [:a :b]
+                  :fn (fn [] :c)))
+      (is (= :c (eval :c)))
+      (is @a-called)
+      (is @b-called))))
+
 (deftest error-handling
   (let [ex (Exception. "hello")]
     (testing "Should catch cell errors and wrap them with relevant info"

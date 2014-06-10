@@ -2,7 +2,7 @@
 
 (defrecord Container [fns state parent level])
 
-(defrecord Fn [fn args level])
+(defrecord Fn [fn args pre level])
 
 (defn start
   ([container level vals]
@@ -36,12 +36,15 @@
       val)))
 
 (defn- do-eval [container k]
-  (let [{:keys [args fn level] :as spec} (-> container :fns (get k))
+  (let [{:keys [args pre fn level] :as spec} (-> container :fns (get k))
         this (find-level container level)
         state (get this :state)]
 
     (when-not spec
-      (throw (Error. (str "Cell " k " is not defined"))))
+      (throw (js/Error. (str "Cell " k " is not defined"))))
+
+    (doseq [task pre]
+      (eval this task))
 
     (let [ret (apply fn (map #(eval this %) args))]
       (swap! state assoc k ret)

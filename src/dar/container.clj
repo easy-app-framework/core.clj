@@ -18,7 +18,7 @@
 
 (defrecord Container [fns state parent level])
 
-(defrecord Fn [fn args level])
+(defrecord Fn [fn args pre level])
 
 (defn start
   ([container level vals]
@@ -67,7 +67,7 @@
              args))
 
 (defn- do-eval [container k]
-  (let [{:keys [args fn level] :as spec} (-> container :fns (get k))
+  (let [{:keys [args pre fn level] :as spec} (-> container :fns (get k))
         this (find-level container level)
         p (new-promise)
         state (get this :state)]
@@ -79,7 +79,10 @@
                         %))
         (let [out (get @state k)]
           (when (identical? p out)
-            (then (go (let [args (<? (eval-args this args))]
+            (then (go
+                    (when pre
+                      (<? (eval-args this pre)))
+                    (let [args (<? (eval-args this args))]
                         (try
                           (<? (apply fn args))
                           (catch Throwable ex
