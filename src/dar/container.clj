@@ -11,37 +11,40 @@
     :args [:a :b]
     :fn #(str %1 %2))
 
-  (def app (make))
-
-  (<?! (eval app :ab)) ;; => "ab"
+  (<?! (eval (ns-app) :ab)) ;; => "ab"
   )
 
-(defrecord Container [fns state parent level])
+(defrecord App [fns state parent level])
 
 (defrecord Fn [fn args pre level])
 
 (defn start
-  ([container level vals]
-   (->Container (:fns container) (atom vals) container level))
-  ([container vals]
-   (start container nil vals))
-  ([container]
-   (start container {})))
+  ([app level vals]
+   (->App (:fns app) (atom vals) app level))
+  ([app vals]
+   (start app nil vals))
+  ([app]
+   (start app {})))
 
-(defn stop! [container])
+(defn stop! [app])
 
-(defn- lookup [container k]
-  (let [parent (:parent container)
-        vals @(:state container)
+(defn- lookup [app k]
+  (let [parent (:parent app)
+        vals @(:state app)
         val (get vals k ::nil)]
     (if (and parent (= ::nil val))
       (recur parent k)
       val)))
 
-(defn- find-level [container level]
-  (if (and level (not= level (:level container)))
-    (recur (:parent container) level)
-    container))
+(defn- find-level [app level]
+  (if level
+    (if-let [this (loop [app app]
+                    (if (and app (= (:level app) level ))
+                      app
+                      (recur (:parent app))))]
+      this
+      app)
+    app))
 
 (declare do-eval)
 
@@ -57,18 +60,18 @@
            coll coll]
       (if (seq coll)
         (recur (conj ret (<? (f (first coll))))
-               (next coll))
+          (next coll))
         ret))))
 
-(defn- eval-args [container args]
+(defn- eval-args [app args]
   (async-map #(if (= ::self %)
-                container
-                (eval container %))
-             args))
+                app
+                (eval app %))
+    args))
 
-(defn- do-eval [container k]
-  (let [{:keys [args pre fn level] :as spec} (-> container :fns (get k))
-        this (find-level container level)
+(defn- do-eval [app k]
+  (let [{:keys [args pre fn level] :as spec} (-> app :fns (get k))
+        this (find-level app level)
         p (new-promise)
         state (get this :state)]
     (if-not spec
@@ -83,41 +86,41 @@
                     (when pre
                       (<? (eval-args this pre)))
                     (let [args (<? (eval-args this args))]
-                        (try
-                          (<? (apply fn args))
-                          (catch Throwable ex
-                            (throw (ex-info (str "Failed to evaluate " k)
-                                            {::level (:level this)
-                                             ::task k}
-                                            ex))))))
-                  #(do
-                     (swap! state assoc k %)
-                     (deliver! p %))))
+                      (try
+                        (<? (apply fn args))
+                        (catch Throwable ex
+                          (throw (ex-info (str "Failed to evaluate " k)
+                                   {::level (:level this)
+                                    ::task k}
+                                   ex))))))
+              #(do
+                 (swap! state assoc k %)
+                 (deliver! p %))))
           out)))))
 
 ;;
 ;; Spec API
 ;;
 
-(defn- fn-entry? [[k v]]
-  (instance? Fn v))
-
-(defn make* [spec]
-  (map->Container {:fns (into {} (filter fn-entry? spec))
-                   :state (atom (into {} (filter (complement fn-entry?) spec)))
-                   :level :app}))
-
 (defn- noop [& _])
 
 (defn define*
-  ([spec k v]
-   (assoc spec k v))
-  ([spec k opt-k opt-v & {:as opts}]
-   (assoc spec k (map->Fn (merge {:args [] :fn noop}
-                                 (assoc opts opt-k opt-v))))))
+  ([app k v]
+   (update-in app [:state] (fn [s]
+                             (atom (assoc @s k v)))))
+  ([app k opt-k opt-v & {:as opts}]
+   (-> app
+     (assoc-in [:fns k] (map->Fn (merge {:args [] :fn noop}
+                                   (assoc opts opt-k opt-v))))
+     (update-in [:state] #(atom @%)))))
+
+(defn include* [app {fns :fns s :state}]
+  (-> app
+    (update-in :fns merge fns)
+    (update-in :state #(atom (merge @% @s)))))
 
 ;;
-;; Implicit per-namespace container
+;; Implicit per-namespace app
 ;;
 
 (defn- var-get* [ns var-name]
@@ -125,43 +128,39 @@
     (when-let [var (find-var s)]
       (var-get var))))
 
-(defn- get-ns-spec-atom
+(defn ns-app
   ([]
-   (get-ns-spec-atom (ns-name *ns*)))
+   (ns-app (ns-name *ns*)))
   ([ns]
-   (var-get* ns '*dar-container-spec*)))
+   (var-get* ns '*dar-app*)))
 
-(defn get-ns-spec
-  ([]
-   (get-ns-spec (ns-name *ns*)))
-  ([ns]
-   (when-let [spec (get-ns-spec-atom ns)]
-     @spec)))
-
-(defn load-ns-spec [ns]
+(defn load-ns-app [ns]
   (require ns)
-  (get-ns-spec ns))
+  (ns-app ns))
 
-(defn declare-spec []
-  (when-not (get-ns-spec)
+(defn declare-app []
+  (when-not (ns-app)
     (.setDynamic (intern *ns*
-                         (with-meta '*dar-container-spec* {:private true})
-                         (atom {})))))
+                   '*dar-app*
+                   (atom (->App {} (atom {}) nil :app))))))
 ;;
 ;; DSL
 ;;
 
-(defn make
-  ([]
-   (make (ns-name *ns*)))
-  ([ns]
-   (make* (or (load-ns-spec ns) {}))))
+(def ^:dynamic *get-app* (fn []
+                           (declare-app)
+                           (ns-app)))
 
 (defn define [& args]
-  (declare-spec)
-  (swap! (get-ns-spec-atom) #(apply define* % args)))
+  (apply swap! (*get-app*) define* args))
 
-(defn include [& namespaces]
-  (let [spec (get-ns-spec-atom)]
-    (doseq [ns namespaces]
-      (swap! spec #(merge % (load-ns-spec ns))))))
+(defn include [ns]
+  (swap! (*get-app*) include* (if (symbol ns)
+                                (load-ns-app ns)
+                                ns)))
+
+(defmacro defapp [& body]
+  `(let [app# (atom (->App {} (atom {}) nil :app))]
+     (binding [*get-app* (fn [] app#)]
+       ~@body
+       @app#)))

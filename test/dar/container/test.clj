@@ -3,15 +3,7 @@
   (:require [clojure.test :refer :all]
             [dar.async :refer :all]
             [dar.async.promise :refer :all]
-            [dar.container :as c :refer [define]])
-  (:import (java.lang Exception)))
-
-(c/declare-spec)
-
-(defmacro defapp [& body]
-  `(binding [*dar-container-spec* (atom {})]
-     ~@body
-     (c/make)))
+            [dar.container :as c :refer [define defapp]]))
 
 (def ^:dynamic *app* nil)
 

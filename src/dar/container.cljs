@@ -55,19 +55,27 @@
 ;; Spec API
 ;;
 
-(defn- fn-entry? [[k v]]
-  (instance? Fn v))
-
-(defn make* [spec]
-  (map->Container {:fns (into {} (filter fn-entry? spec))
-                   :state (atom (into {} (filter (complement fn-entry?) spec)))
-                   :level :app}))
-
 (defn- noop [& _])
 
 (defn define*
-  ([spec k v]
-   (assoc spec k v))
-  ([spec k opt-k opt-v & {:as opts}]
-   (assoc spec k (map->Fn (merge {:args [] :fn noop}
-                                 (assoc opts opt-k opt-v))))))
+  ([app k v]
+   (update-in app [:state] (fn [s]
+                             (atom (assoc @s k v)))))
+  ([app k opt-k opt-v & {:as opts}]
+   (-> app
+     (assoc-in [:fns k] (map->Fn (merge {:args [] :fn noop}
+                                   (assoc opts opt-k opt-v))))
+     (update-in [:state] #(atom @%)))))
+
+(defn include* [app {fns :fns s :state}]
+  (-> app
+    (update-in :fns merge fns)
+    (update-in :state #(atom (merge @% @s)))))
+
+(def ^:dynamic *get-app* nil)
+
+(defn define [& args]
+  (apply swap! (*get-app*) define* args))
+
+(defn include [app]
+  (swap! (*get-app*) include* app))
