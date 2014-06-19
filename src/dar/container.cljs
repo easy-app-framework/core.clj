@@ -72,10 +72,14 @@
     (update-in :fns merge fns)
     (update-in :state #(atom (merge @% @s)))))
 
-(def ^:dynamic *get-app* nil)
+;;
+;; DSL
+;;
+
+(def ^:dynamic *app* nil)
 
 (defn define [& args]
-  (apply swap! (*get-app*) define* args))
+  (apply swap! *app* define* args))
 
 (defn include [app]
-  (swap! (*get-app*) include* app))
+  (swap! *app* include* app))

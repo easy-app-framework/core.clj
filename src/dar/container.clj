@@ -4,14 +4,15 @@
             [dar.async.promise :refer :all]))
 
 (comment
-  (define :a "a")
-  (define :b "b")
+  (defapp app
+    (define :a "a")
+    (define :b "b")
 
-  (define :ab
-    :args [:a :b]
-    :fn #(str %1 %2))
+    (define :ab
+      :args [:a :b]
+      :fn #(str %1 %2)))
 
-  (<?! (eval (ns-app) :ab)) ;; => "ab"
+  (<?! (eval app :ab)) ;; => "ab"
   )
 
 (defrecord App [fns state parent level])
@@ -120,47 +121,21 @@
     (update-in :state #(atom (merge @% @s)))))
 
 ;;
-;; Implicit per-namespace app
-;;
-
-(defn- var-get* [ns var-name]
-  (let [s (symbol (name ns) (name var-name))]
-    (when-let [var (find-var s)]
-      (var-get var))))
-
-(defn ns-app
-  ([]
-   (ns-app (ns-name *ns*)))
-  ([ns]
-   (var-get* ns '*dar-app*)))
-
-(defn load-ns-app [ns]
-  (require ns)
-  (ns-app ns))
-
-(defn declare-app []
-  (when-not (ns-app)
-    (.setDynamic (intern *ns*
-                   '*dar-app*
-                   (atom (->App {} (atom {}) nil :app))))))
-;;
 ;; DSL
 ;;
 
-(def ^:dynamic *get-app* (fn []
-                           (declare-app)
-                           (ns-app)))
+(def ^:dynamic *app* nil)
 
 (defn define [& args]
-  (apply swap! (*get-app*) define* args))
+  (apply swap! *app* define* args))
 
-(defn include [ns]
-  (swap! (*get-app*) include* (if (symbol ns)
-                                (load-ns-app ns)
-                                ns)))
+(defn include [app]
+  (swap! *app* include* app))
 
-(defmacro defapp [& body]
-  `(let [app# (atom (->App {} (atom {}) nil :app))]
-     (binding [*get-app* (fn [] app#)]
-       ~@body
-       @app#)))
+(defmacro application [& body]
+  `(binding [*app* (atom (->App {} (atom {}) nil :app))]
+     ~@body
+     @*app*))
+
+(defmacro defapp [name & body]
+  `(def ~name (application ~@body)))

@@ -3,7 +3,7 @@
   (:require [clojure.test :refer :all]
             [dar.async :refer :all]
             [dar.async.promise :refer :all]
-            [dar.container :as c :refer [define defapp]]))
+            [dar.container :as c :refer [define application]]))
 
 (def ^:dynamic *app* nil)
 
@@ -15,7 +15,7 @@
   (<<! (c/eval *app* k)))
 
 (deftest basic
-  (with-app (defapp
+  (with-app (application
               (define :a "a")
               (define :b "b")
               (define :ab
@@ -26,7 +26,7 @@
 
 (deftest async-function
   (let [p (new-promise)]
-    (with-app (defapp
+    (with-app (application
                 (define :a
                   :fn (fn [] p))
                 (define :ab
@@ -40,7 +40,7 @@
 (deftest levels
   (let [a-times (atom 0)
         b-times (atom 0)]
-    (with-app (defapp
+    (with-app (application
                 (define :a
                   :level :app
                   :fn (fn []
@@ -62,7 +62,7 @@
 (deftest pre-tasks
   (let [a-called (atom false)
         b-called (atom false)]
-    (with-app (defapp
+    (with-app (application
                 (define :a :fn #(reset! a-called true))
                 (define :b :fn #(reset! b-called true))
                 (define :c
@@ -75,7 +75,7 @@
 (deftest error-handling
   (let [ex (Exception. "hello")]
     (testing "Should catch task errors and wrap them with relevant info"
-      (with-app (defapp
+      (with-app (application
                   (define :sync
                     :fn #(throw ex))
 
@@ -104,7 +104,7 @@
     (testing "Should not attempt to evaluate tasks with errors twice"
       (let [a-times (atom 0)
             ab-times (atom 0)]
-        (with-app (defapp
+        (with-app (application
                     (define :a
                       :fn (fn []
                             (swap! a-times inc)
