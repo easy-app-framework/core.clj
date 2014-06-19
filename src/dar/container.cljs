@@ -1,31 +1,32 @@
-(ns dar.container)
+(ns dar.container
+  (:refer-clojure :exclude [eval]))
 
-(defrecord Container [fns state parent level])
+(defrecord App [fns state parent level])
 
 (defrecord Fn [fn args pre level])
 
 (defn start
-  ([container level vals]
-   (->Container (:fns container) (atom vals) container level))
-  ([container vals]
-   (start container nil vals))
-  ([container]
-   (start container {})))
+  ([app level vals]
+   (->App (:fns app) (atom vals) app level))
+  ([app vals]
+   (start app nil vals))
+  ([app]
+   (start app {})))
 
-(defn stop! [container])
+(defn stop! [app])
 
-(defn- lookup [container k]
-  (let [parent (:parent container)
-        vals @(:state container)
+(defn- lookup [app k]
+  (let [parent (:parent app)
+        vals @(:state app)
         val (get vals k ::nil)]
     (if (and parent (= ::nil val))
       (recur parent k)
       val)))
 
-(defn- find-level [container level]
-  (if (and level (not= level (:level container)))
-    (recur (:parent container) level)
-    container))
+(defn- find-level [app level]
+  (if (and level (not= level (:level app)))
+    (recur (:parent app) level)
+    app))
 
 (declare do-eval)
 
@@ -35,9 +36,9 @@
       (do-eval this k)
       val)))
 
-(defn- do-eval [container k]
-  (let [{:keys [args pre fn level] :as spec} (-> container :fns (get k))
-        this (find-level container level)
+(defn- do-eval [app k]
+  (let [{:keys [args pre fn level] :as spec} (-> app :fns (get k))
+        this (find-level app level)
         state (get this :state)]
 
     (when-not spec
