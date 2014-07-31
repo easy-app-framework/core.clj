@@ -1,9 +1,8 @@
 (ns dar.container.bench
   (:require [criterium.core :as criterium]
-            [dar.async :refer :all]
-            [dar.async.promise :refer :all]
-            [dar.container :as co :refer [define]]
-            [dar.container.sync :as sync]))
+            [dar.container :refer :all]))
+
+(application bench)
 
 (define :a 1)
 (define :b 2)
@@ -51,38 +50,23 @@
   :args [:a+ :b+ :e+ :ab+ :cd+ :d+ :abcde]
   :fn +)
 
-(def app (co/make))
-(def app-state @(:state app))
-
-(defn promise-overhead [_] ;; core.async has 2.5mcs here
-  (doto (new-promise) (deliver! 1)))
-
-(defn just-a-go-block [_]
-  (go 1))
-
 (defn simple-access [app]
-  (<<! (co/eval app :a)))
+  (evaluate app :a))
 
 (defn calc-2-args [app]
-  (<<! (co/eval app :ab)))
+  (evaluate app :ab))
 
 (defn calc-5-args [app]
-  (<<! (co/eval app :abcde)))
+  (evaluate app :abcde))
 
 (defn start-next-level-and-access [app]
-  (<<! (co/eval (co/start app) :a)))
+  (evaluate (start app) :a))
 
 (defn calc-5-args-from-prev-level [app]
-  (<<! (co/eval (co/start app) :abcde)))
+  (evaluate (start app) :abcde))
 
 (defn big-calc [app]
-  (<<! (co/eval app :big-calc)))
-
-(defn sync-calc-5-args [app]
-  (sync/eval app :abcde))
-
-(defn sync-big-calc [app]
-  (sync/eval app :big-calc))
+  (evaluate app :big-calc))
 
 (defmacro qb [fun]
   `(do
@@ -90,21 +74,17 @@
      (println "============================================================")
      (println '~fun)
      (println "============================================================")
-     (criterium/quick-bench (~fun (assoc app :state (atom app-state))))
+     (criterium/quick-bench (~fun (start bench)))
      (println)))
 
 (defn measure-overhead [_])
 
 (defn -main []
   (qb measure-overhead)
-  (qb just-a-go-block)
-  (qb promise-overhead)
   (qb simple-access)
   (qb calc-2-args)
   (qb calc-5-args)
   (qb start-next-level-and-access)
   (qb calc-5-args-from-prev-level)
   (qb big-calc)
-  (qb sync-calc-5-args)
-  (qb sync-big-calc)
   )
