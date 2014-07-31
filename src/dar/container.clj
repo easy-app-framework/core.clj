@@ -1,7 +1,6 @@
 (ns dar.container
-  (:refer-clojure :exclude [eval promise])
-  (:require [dar.async :refer :all]
-            [dar.async.promise :refer :all]))
+  (:refer-clojure :exclude [promise])
+  (:require [dar.async.promise :refer :all]))
 
 (comment
   (defapp app
@@ -12,16 +11,20 @@
       :args [:a :b]
       :fn #(str %1 %2)))
 
-  (<?! (eval app :ab)) ;; => "ab"
+  (evaluate app :ab) ;; => "ab"
   )
 
-(defrecord App [fns state parent level])
+(defrecord App [spec state parent level])
 
 (defrecord Fn [fn args pre level])
 
+(defrecord Value [value])
+
 (defn start
   ([app level vals]
-   (->App (:fns app) (atom vals) app level))
+   (if (instance? App app)
+     (->App (:spec app) (atom vals) app level)
+     (->App app (atom vals) nil level)))
   ([app vals]
    (start app nil vals))
   ([app]
@@ -33,109 +36,154 @@
   (let [parent (:parent app)
         vals @(:state app)
         val (get vals k ::nil)]
-    (if (and parent (= ::nil val))
+    (if (and (= ::nil val) parent)
       (recur parent k)
       val)))
 
 (defn- find-level [app level]
-  (if level
-    (if-let [this (loop [app app]
-                    (if (and app (= (:level app) level ))
-                      app
-                      (recur (:parent app))))]
-      this
-      app)
-    app))
+  (loop [this app]
+    (cond
+      (nil? level) app
+      (nil? this) app
+      (= (:level this) level) this
+      :else (recur (:parent this)))))
 
-(declare do-eval)
+(declare do-eval do-eval-fn)
 
-(defn eval [this k]
+(defn evaluate [this k]
   (let [val (lookup this k)]
     (if (= ::nil val)
       (do-eval this k)
       val)))
 
-(defn- async-map [f coll]
-  (go
-    (loop [ret []
-           coll coll]
-      (if (seq coll)
-        (recur (conj ret (<? (f (first coll))))
-          (next coll))
-        ret))))
-
-(defn- eval-args [app args]
-  (async-map #(if (= ::self %)
-                app
-                (eval app %))
-    args))
+(defn- async-reduce
+  ([xs] (async-reduce (fn [_ x] x) nil xs))
+  ([f init xs] (async-reduce f init xs nil nil))
+  ([f init xs p current]
+   (if (seq xs)
+     (let [x (first xs)]
+       (if (delivered? x)
+         (let [v (value x)]
+           (if (instance? Throwable v)
+             (if p (deliver! p v)  v)
+             (recur f (f init v) (next xs) p current)))
+         (let [current (or current (atom nil))
+               p (or p (new-promise (fn [_]
+                                      (when-let [x @current]
+                                        (abort! x)))))]
+           (reset! current x)
+           (then x (fn [v]
+                     (reset! current nil)
+                     (if (instance? Throwable v)
+                       (deliver! p v)
+                       (async-reduce f (f init v) (next xs) p current))))
+           p)))
+     (if p
+       (deliver! p init)
+       init))))
 
 (defn- do-eval [app k]
-  (let [{:keys [args pre fn level] :as spec} (-> app :fns (get k))
-        this (find-level app level)
-        p (new-promise)
-        state (get this :state)]
-    (if-not spec
-      (IllegalArgumentException. (str "Task " k " is not defined"))
-      (do
-        (swap! state #(if (= ::nil (get % k ::nil))
-                        (assoc % k p)
-                        %))
-        (let [out (get @state k)]
-          (when (identical? p out)
-            (then (go
-                    (when pre
-                      (<? (eval-args this pre)))
-                    (let [args (<? (eval-args this args))]
-                      (try
-                        (<? (apply fn args))
-                        (catch Throwable ex
-                          (throw (ex-info (str "Failed to evaluate " k)
-                                   {::level (:level this)
-                                    ::task k}
-                                   ex))))))
-              #(do
-                 (swap! state assoc k %)
-                 (deliver! p %))))
-          out)))))
+  (if-let [task (-> app :spec (get k))]
+    (let [v (get task :value ::nil)]
+      (if (= v ::nil)
+        (do-eval-fn app k task)
+        (do
+          (swap! (:state app) assoc k v)
+          v)))
+    (IllegalArgumentException. (str "Task " k " is not defined"))))
+
+(defmacro ^:private step [form]
+  `(lazy-seq
+     [~form]))
+
+(defn- do-eval-fn [app k {f :fn :keys [args pre level]}]
+  (let [this (find-level app level)
+        state (:state this)
+        p (new-promise)]
+
+    (swap! state #(if (= (get % k ::nil) ::nil)
+                    (assoc % k p)
+                    %))
+
+    (let [out (get @state k)]
+      (when (identical? p out)
+        (let [eval #(evaluate this %)
+              arguments (object-array (count args))
+              job (async-reduce
+                    (concat
+                      (map eval pre)
+                      (step
+                        (async-reduce (fn [idx v]
+                                        (aset arguments idx v)
+                                        (inc idx))
+                          0
+                          (map eval args)))
+                      (step
+                        (try
+                          (apply f arguments)
+                          (catch Throwable e
+                            e)))))]
+          (then job
+            (fn [v]
+              (let [ret (if (instance? Throwable v)
+                          (ex-info (str "Failed to evaluate " k)
+                            {::level (:level this)
+                             ::task k}
+                            v)
+                          v)]
+                (swap! state assoc k ret)
+                (deliver! out ret))))))
+      (if (delivered? out)
+        (value out)
+        out))))
 
 ;;
 ;; Spec API
 ;;
 
-(defn- noop [& _])
-
 (defn define*
-  ([app k v]
-   (update-in app [:state] (fn [s]
-                             (atom (assoc @s k v)))))
-  ([app k opt-k opt-v & {:as opts}]
-   (-> app
-     (assoc-in [:fns k] (map->Fn (merge {:args [] :fn noop}
-                                   (assoc opts opt-k opt-v))))
-     (update-in [:state] #(atom @%)))))
+  ([spec k v]
+   (assoc spec k (->Value v)))
+  ([spec k opt-k opt-v & {:as opts}]
+   (assoc spec k (map->Fn (merge
+                            {:args [] :fn (fn noop [& _])}
+                            (assoc opts opt-k opt-v))))))
 
-(defn include* [app {fns :fns s :state}]
-  (-> app
-    (update-in :fns merge fns)
-    (update-in :state #(atom (merge @% @s)))))
+(defn spec-var-atom []
+  (var-get
+    (or
+      (find-var (symbol
+                  (name (ns-name *ns*))
+                  (name '*dar-container-spec*)))
+      (intern *ns*
+        (with-meta '*dar-container-spec* {:private true})
+        (atom nil)))))
 
-;;
-;; DSL
-;;
+(def ^:dynamic ^:private *app* nil)
 
-(def ^:dynamic *app* nil)
+(defn swap [f & args]
+  (if *app*
+    (apply swap! *app* f args)
+    (let [v @(spec-var-atom)]
+      (apply alter-var-root v f args)))
+  nil)
 
 (defn define [& args]
-  (apply swap! *app* define* args))
+  (apply swap define* args))
 
 (defn include [app]
-  (swap! *app* include* app))
+  (swap merge app))
 
-(defmacro application [& body]
-  `(binding [*app* (atom (->App {} (atom {}) nil :app))]
+(defmacro with-app [app & body]
+  `(binding [*app* (atom ~app)]
      ~@body
      @*app*))
 
+(defmacro application [name]
+  `(reset! (spec-var-atom)
+     (def ~name {})))
+
 (defmacro defapp [name & body]
-  `(def ~name (application ~@body)))
+  `(def ~name
+     (with-app {}
+       ~@body)))
