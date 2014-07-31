@@ -1,7 +1,6 @@
 (ns dar.container.sync
   "Simplistic, fully sync implementation of eval function
-  as a performance reference"
-  (:refer-clojure :exclude [eval]))
+  as a performance reference")
 
 (defn- lookup [container k]
   (let [parent (:parent container)
@@ -16,22 +15,27 @@
     (recur (:parent container) level)
     container))
 
-(declare do-eval)
+(declare do-eval do-eval-fn)
 
-(defn eval [this k]
+(defn evaluate [this k]
   (let [val (lookup this k)]
     (if (= ::nil val)
       (do-eval this k)
       val)))
 
-(defn- do-eval [container k]
-  (let [{:keys [args fn async level] :as spec} (-> container :fns (get k))
-        this (find-level container level)
+(defn- do-eval [app k]
+  (if-let [task (-> app :spec (get k))]
+    (let [v (get task :value ::nil)]
+      (if (= v ::nil)
+        (do-eval-fn app k task)
+        (do
+          (swap! (:state app) assoc k v)
+          v)))
+    (IllegalArgumentException. (str "Task " k " is not defined"))))
+
+(defn- do-eval-fn [container k {f :fn :keys [args pre level]}]
+  (let [this (find-level container level)
         state (get this :state)]
-
-    (when-not spec
-      (throw (IllegalArgumentException. (str "Cell " k " is not defined"))))
-
-    (let [ret (apply fn (map #(eval this %) args))]
+    (let [ret (apply f (map #(evaluate this %) args))]
       (swap! state assoc k ret)
       ret)))

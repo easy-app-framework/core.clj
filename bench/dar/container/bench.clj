@@ -1,6 +1,7 @@
 (ns dar.container.bench
   (:require [criterium.core :as criterium]
-            [dar.container :refer :all]))
+            [dar.container :refer :all]
+            [dar.container.sync :as sync]))
 
 (application bench)
 
@@ -68,6 +69,12 @@
 (defn big-calc [app]
   (evaluate app :big-calc))
 
+(defn sync-calc-5-args [app]
+  (sync/evaluate app :abcde))
+
+(defn sync-big-calc [app]
+  (sync/evaluate app :big-calc))
+
 (defmacro qb [fun]
   `(do
      (println)
@@ -87,4 +94,5 @@
   (qb start-next-level-and-access)
   (qb calc-5-args-from-prev-level)
   (qb big-calc)
+  (qb sync-big-calc)
   )
