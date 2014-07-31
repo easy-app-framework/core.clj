@@ -29,98 +29,114 @@
     (is (= (eval :a) "a"))
     (is (= (eval :ab) "ab"))))
 
-;; (deftest async-function
-;;   (let [p (new-promise)]
-;;     (with-app (application
-;;                 (define :a
-;;                   :fn (fn [] p))
-;;                 (define :ab
-;;                   :args [:a]
-;;                   :fn (fn [a]
-;;                         (str a "b"))))
-;;       (c/eval *app* :ab)
-;;       (deliver! p "a")
-;;       (is (= "ab" (eval :ab))))))
+(application async)
 
-;; (deftest levels
-;;   (let [a-times (atom 0)
-;;         b-times (atom 0)]
-;;     (with-app (application
-;;                 (define :a
-;;                   :level :app
-;;                   :fn (fn []
-;;                         (swap! a-times inc)
-;;                         "a"))
-;;                 (define :b
-;;                   :fn (fn []
-;;                         (swap! b-times inc)
-;;                         "b")))
-;;       (with-app (c/start *app*)
-;;         (is (= "a" (eval :a)))
-;;         (is (= "b" (eval :b))))
-;;       (with-app (c/start *app*)
-;;         (is (= "a" (eval :a)))
-;;         (is (= "b" (eval :b))))
-;;       (is (= 1 @a-times))
-;;       (is (= 2 @b-times)))))
+(define :1
+  :args [:log :p1]
+  :fn (fn [log p]
+        (log 1)
+        p))
 
-;; (deftest pre-tasks
-;;   (let [a-called (atom false)
-;;         b-called (atom false)]
-;;     (with-app (application
-;;                 (define :a :fn #(reset! a-called true))
-;;                 (define :b :fn #(reset! b-called true))
-;;                 (define :c
-;;                   :pre [:a :b]
-;;                   :fn (fn [] :c)))
-;;       (is (= :c (eval :c)))
-;;       (is @a-called)
-;;       (is @b-called))))
+(define :2
+  :args [:log :p2 :1]
+  :fn (fn [log p _]
+        (log 2)
+        p))
 
-;; (deftest error-handling
-;;   (let [ex (Exception. "hello")]
-;;     (testing "Should catch task errors and wrap them with relevant info"
-;;       (with-app (application
-;;                   (define :sync
-;;                     :fn #(throw ex))
+(define :12
+  :args [:log :1 :2]
+  :fn (fn [log v1 _]
+        (log 12)))
 
-;;                   (define :async
-;;                     :fn #(doto (new-promise)
-;;                            (deliver! ex)))
+(deftest async-tasks
+  (let [log (atom [])
+        write #(swap! log conj %)
+        p1 (new-promise)
+        p2 (new-promise)]
+    (with (start async {:log write
+                        :p1 p1
+                        :p2 p2})
+      (then (eval :12) (fn [_]
+                         (write :done)))
+      (is (= @log []))
+      (deliver! p1 1)
+      (is (= @log [1]))
+      (deliver! p2 2)
+      (is (= @log [1 2 12 :done])))))
 
-;;                   (define :task
-;;                     :args [:async]
-;;                     :fn (fn [_] (throw (Exception. "Should not reach here")))))
+(application multi-level)
 
-;;         (testing "Sync case"
-;;           (let [res (eval :sync)]
-;;             (is (= (ex-data res) {::c/level :app ::c/task :sync}))
-;;             (is (identical? ex (.getCause res)))))
+(define :value 0)
 
-;;         (testing "Async case"
-;;           (let [res (eval :async)]
-;;             (is (= (ex-data res) {::c/level :app ::c/task :async}))
-;;             (is (identical? ex (.getCause res)))))
+(define :a
+  :level :app
+  :args [:a-times :value]
+  :fn (fn [times v]
+        (swap! times inc)
+        v))
 
-;;         (testing "Should pass errors from dependencies as-is"
-;;           (let [res (eval :task)]
-;;             (is (= :async (-> res ex-data ::c/task)))))))
+(define :b
+  :args [:b-times :value]
+  :fn (fn [times v]
+        (swap! times inc)
+        v))
 
-;;     (testing "Should not attempt to evaluate tasks with errors twice"
-;;       (let [a-times (atom 0)
-;;             ab-times (atom 0)]
-;;         (with-app (application
-;;                     (define :a
-;;                       :fn (fn []
-;;                             (swap! a-times inc)
-;;                             (throw ex)))
-;;                     (define :ab
-;;                       :args [:a]
-;;                       :fn (fn [a]
-;;                             (swap! ab-times inc)
-;;                             (str a "b"))))
-;;           (let [res1 (eval :ab)
-;;                 res2 (eval :ab)]
-;;             (is (identical? res1 res2))
-;;             (is (= @a-times 1))
-;;             (is (= @ab-times 0))))))))
+(define :ab
+  :args [:a :b]
+  :fn +)
+
+(deftest levels
+  (let [a-times (atom 0)
+        b-times (atom 0)]
+    (with (start multi-level :app {:a-times a-times
+                                   :b-times b-times})
+      (with (start *app* {:value 1})
+        (is (= (eval :ab) 1)))
+
+      (with (start *app* {:value 2})
+        (is (= (eval :ab) 2)))
+
+      (is (= 1 @a-times))
+      (is (= 2 @b-times)))))
+
+(deftest pre-tasks
+  (let [a-called (atom false)
+        b-called (atom false)]
+    (with (start {:a {:fn #(reset! a-called true)}
+                  :b {:fn #(reset! b-called true)}
+                  :c {:fn (fn [] :c)
+                      :pre [:a :b]}})
+      (is (= (eval :c) :c))
+      (is @a-called)
+      (is @b-called))))
+
+(deftest error-handling
+  (let [ex (Exception. "hello")
+        p (new-promise)]
+    (testing "Should catch task errors and wrap them with relevant info"
+      (with (start {:sync {:fn #(throw ex)}
+                    :async {:fn (fn [] p)}
+                    :task {:args [:async]
+                           :fn (fn [_]
+                                 (print "reached!")
+                                 (throw (Exception. "Should not reach here")))}})
+
+        (testing "Sync case"
+          (let [err (eval :sync)
+                data (ex-data err)]
+            (is (= (:dar.container/task data) :sync))
+            (is (identical? (.getCause err) ex))))
+
+        (testing "Async case"
+          (let [result (eval :async)]
+            (is (not (delivered? result)))
+            (deliver! p ex)
+            (let [err (value result)
+                  data (ex-data err)]
+              (is (= (:dar.container/task data) :async))
+              (is (identical? (.getCause err) ex)))))
+
+        (testing "Should pass errors from dependencies as-is"
+          (let [err (eval :task)
+                data (ex-data err)]
+            (is (= (:dar.container/task data) :async))))))))

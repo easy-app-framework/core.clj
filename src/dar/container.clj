@@ -92,9 +92,11 @@
           v)))
     (IllegalArgumentException. (str "Task " k " is not defined"))))
 
-(defmacro ^:private step [form]
-  `(lazy-seq
-     [~form]))
+(defmacro ^:private steps
+  ([] `nil)
+  ([form & rest]
+   `(lazy-seq
+      (cons ~form (steps ~@rest)))))
 
 (defn- do-eval-fn [app k {f :fn :keys [args pre level]}]
   (let [this (find-level app level)
@@ -107,25 +109,28 @@
 
     (let [out (get @state k)]
       (when (identical? p out)
-        (let [eval #(evaluate this %)
-              arguments (object-array (count args))
+        (let [arguments (object-array (count args))
+              wrap-error? (atom false)
               job (async-reduce
                     (concat
-                      (map eval pre)
-                      (step
+                      (map #(evaluate this %) pre)
+                      (steps
                         (async-reduce (fn [idx v]
                                         (aset arguments idx v)
                                         (inc idx))
                           0
-                          (map eval args)))
-                      (step
+                          (map #(if (= % ::app)
+                                  this
+                                  (evaluate this %))
+                            args))
+                        (reset! wrap-error? true)
                         (try
                           (apply f arguments)
                           (catch Throwable e
                             e)))))]
           (then job
             (fn [v]
-              (let [ret (if (instance? Throwable v)
+              (let [ret (if (and (instance? Throwable v) @wrap-error?)
                           (ex-info (str "Failed to evaluate " k)
                             {::level (:level this)
                              ::task k}
