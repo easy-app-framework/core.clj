@@ -2,18 +2,27 @@
   (:require [dar.async.promise :refer :all]))
 
 (comment
-  (defapp app
-    (define :a "a")
-    (define :b "b")
+  (application app)
 
-    (define :ab
-      :args [:a :b]
-      :fn #(str %1 %2)))
+  (define :a "a")
 
-  (evaluate app :ab) ;; => "ab"
+  (define :b "b")
+
+  (define :ab
+    :args [:a :b]
+    :fn #(str %1 %2))
+
+  (evaluate (start app) :ab) ;; => "ab"
   )
 
-(defrecord App [spec state parent level])
+(defprotocol ICloseable
+  (close! [this]))
+
+(extend-protocol ICloseable
+  java.lang.AutoCloseable
+  (close! [this] (.close this)))
+
+(defrecord App [spec state parent level stopped])
 
 (defrecord Fn [fn args pre level])
 
@@ -22,14 +31,19 @@
 (defn start
   ([app level vals]
    (if (instance? App app)
-     (->App (:spec app) (atom vals) app level)
-     (->App app (atom vals) nil level)))
+     (->App (:spec app) (atom vals) app level (new-promise))
+     (->App app (atom vals) nil level (new-promise))))
   ([app vals]
    (start app nil vals))
   ([app]
    (start app {})))
 
-(defn stop! [app])
+(defn stop! [app]
+  (deliver! (:stopped app) true))
+
+(extend-protocol ICloseable
+  App
+  (close! [app] (stop! app)))
 
 (defn- lookup [app k]
   (let [parent (:parent app)
@@ -97,7 +111,7 @@
    `(lazy-seq
       (cons ~form (steps ~@rest)))))
 
-(defn- do-eval-fn [app k {f :fn :keys [args pre level]}]
+(defn- do-eval-fn [app k {f :fn :keys [args pre level close]}]
   (let [this (find-level app level)
         state (:state this)
         aborted (new-promise)
@@ -138,7 +152,17 @@
                             {::level (:level this)
                              ::task k}
                             v)
-                          v)]
+                          (do
+                            (when close
+                              (then (:stopped this)
+                                (fn [_]
+                                  (try
+                                    (if (fn? close)
+                                      (close v)
+                                      (close! v))
+                                    (catch Throwable e
+                                      (println e))))))
+                            v))]
                 (swap! state assoc k ret)
                 (deliver! out ret))))))
       (if (delivered? out)
