@@ -100,7 +100,9 @@
 (defn- do-eval-fn [app k {f :fn :keys [args pre level]}]
   (let [this (find-level app level)
         state (:state this)
-        p (new-promise)]
+        aborted (new-promise)
+        p (new-promise (fn [_]
+                         (deliver! aborted true)))]
 
     (swap! state #(if (= (get % k ::nil) ::nil)
                     (assoc % k p)
@@ -112,7 +114,8 @@
               wrap-error? (atom false)
               job (async-reduce
                     (concat
-                      (map #(evaluate this %) pre)
+                      (when (seq pre)
+                        (map #(evaluate this %) pre))
                       (steps
                         (async-reduce (fn [idx v]
                                         (aset arguments idx v)
@@ -127,6 +130,7 @@
                           (apply f arguments)
                           (catch Throwable e
                             e)))))]
+          (then aborted (fn [_] (abort! job)))
           (then job
             (fn [v]
               (let [ret (if (and (instance? Throwable v) @wrap-error?)
