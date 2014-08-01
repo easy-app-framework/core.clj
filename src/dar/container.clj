@@ -125,8 +125,8 @@
                                   this
                                   (evaluate this %))
                             args))
-                        (reset! wrap-error? true)
                         (try
+                          (reset! wrap-error? true)
                           (apply f arguments)
                           (catch Throwable e
                             e)))))]
