@@ -1,5 +1,4 @@
 (ns dar.container
-  (:refer-clojure :exclude [promise])
   (:require [dar.async.promise :refer :all]))
 
 (comment

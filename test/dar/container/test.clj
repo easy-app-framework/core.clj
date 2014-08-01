@@ -1,7 +1,6 @@
 (ns dar.container.test
   (:refer-clojure :exclude [eval])
   (:require [clojure.test :refer :all]
-            [dar.async :refer :all]
             [dar.async.promise :refer :all]
             [dar.container :refer :all]))
 
