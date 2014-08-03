@@ -1,19 +1,17 @@
 (ns dar.container
+  "Examples:
+    (application app)
+
+    (define :a 1)
+    (define :b 2)
+
+    (define :ab
+      :args [:a :b]
+      :fn +)
+
+    (evaluate (start app) :ab) => 3
+  "
   (:require [dar.async.promise :refer :all]))
-
-(comment
-  (application app)
-
-  (define :a "a")
-
-  (define :b "b")
-
-  (define :ab
-    :args [:a :b]
-    :fn #(str %1 %2))
-
-  (evaluate (start app) :ab) ;; => "ab"
-  )
 
 (defrecord App [spec state parent level stopped])
 
