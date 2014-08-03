@@ -17,7 +17,7 @@
 
 (defrecord App [spec state parent level stopped])
 
-(defrecord Fn [fn args pre level])
+(defrecord Fn [fn args pre level close])
 
 (defrecord Value [value])
 
