@@ -15,13 +15,6 @@
   (evaluate (start app) :ab) ;; => "ab"
   )
 
-(defprotocol ICloseable
-  (close! [this]))
-
-(extend-protocol ICloseable
-  java.lang.AutoCloseable
-  (close! [this] (.close this)))
-
 (defrecord App [spec state parent level stopped])
 
 (defrecord Fn [fn args pre level])
@@ -40,10 +33,6 @@
 
 (defn stop! [app]
   (deliver! (:stopped app) true))
-
-(extend-protocol ICloseable
-  App
-  (close! [app] (stop! app)))
 
 (defn- lookup [app k]
   (let [parent (:parent app)
@@ -157,9 +146,7 @@
                               (then (:stopped this)
                                 (fn [_]
                                   (try
-                                    (if (fn? close)
-                                      (close v)
-                                      (close! v))
+                                    (close v)
                                     (catch Throwable e
                                       (println e))))))
                             v))]
