@@ -17,10 +17,6 @@
 
 (defrecord App [spec state parent level stopped])
 
-(defrecord Fn [fn args pre level close])
-
-(defrecord Value [value])
-
 (defn start
   "Create a new container instance from either spec or another app.
   In latter case the given app will be used as parent."
@@ -169,11 +165,11 @@
 
 (defn define*
   ([spec k v]
-   (assoc spec k (->Value v)))
+   (assoc spec k {:value v}))
   ([spec k opt-k opt-v & {:as opts}]
-   (assoc spec k (map->Fn (merge
-                            {:args [] :fn (fn noop [& _])}
-                            (assoc opts opt-k opt-v))))))
+   (assoc spec k (merge
+                   {:args [] :fn (fn noop [& _])}
+                   (assoc opts opt-k opt-v)))))
 
 (defn spec-var-atom []
   (var-get
