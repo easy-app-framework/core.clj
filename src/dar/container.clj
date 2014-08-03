@@ -22,6 +22,8 @@
 (defrecord Value [value])
 
 (defn start
+  "Create a new container instance from either spec or another app.
+  In latter case the given app will be used as parent."
   ([app level vals]
    (if (instance? App app)
      (->App (:spec app) (atom vals) app level (new-promise))
@@ -31,7 +33,9 @@
   ([app]
    (start app {})))
 
-(defn stop! [app]
+(defn stop!
+  "Close all closeable values of the given instance."
+  [app]
   (deliver! (:stopped app) true))
 
 (defn- lookup [app k]
@@ -52,10 +56,13 @@
 
 (declare do-eval do-eval-fn)
 
-(defn evaluate [this k]
-  (let [val (lookup this k)]
+(defn evaluate
+  "Evaluate the task k. If computation is async returns
+  a promise, otherwise result value (which might be an Exception)."
+  [app k]
+  (let [val (lookup app k)]
     (if (= ::nil val)
-      (do-eval this k)
+      (do-eval app k)
       val)))
 
 (defn- async-reduce
@@ -183,26 +190,61 @@
 (defn swap [f & args]
   (if *app*
     (apply swap! *app* f args)
-    (let [v @(spec-var-atom)]
-      (apply alter-var-root v f args)))
+    (if-let [v @(spec-var-atom)]
+      (apply alter-var-root v f args)
+      (throw (IllegalStateException.
+               "This function must be called only within a (with-app ...) form
+               or after (application ...) declaration."))))
   nil)
 
-(defn define [& args]
+(defn define
+  [& args]
   (apply swap define* args))
 
 (defn include [app]
   (swap merge app))
 
-(defmacro with-app [app & body]
-  `(binding [*app* (atom ~app)]
-     ~@body
-     @*app*))
+(defmacro application
+  "Declares a new Var initialized with an empty spec, i.e. (def name {}).
+  Use define, include or swap to add task definitions.
 
-(defmacro application [name]
+  Examples:
+    (application foo)
+    (define :a 1)
+
+    (application bar)
+    (define :a 2)
+
+    foo => {:a {:value 1}}
+    bar => {:a {:value 2}}
+  "
+  [name]
   `(reset! (spec-var-atom)
      (def ~name {})))
 
-(defmacro defapp [name & body]
+(defmacro defapp
+  "Like (application ...), but it doesn't use Var hacks,
+   allows only in-place definitions.
+
+  Examples:
+    (defapp foo
+      (define :a 1))
+
+    foo => {:a {:value 1}}
+  "
+  [name & body]
   `(def ~name
      (with-app {}
        ~@body)))
+
+(defmacro with-app
+  "Extend the given app with define, include or swap
+
+  Examples:
+    (with-app {:a {:value 1}}
+      (define :b 2)) => {:a {:value 1}, :b {:value 2}}
+  "
+  [app & body]
+  `(binding [*app* (atom ~app)]
+     ~@body
+     @*app*))
