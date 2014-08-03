@@ -137,10 +137,12 @@
           (then aborted (fn [_] (abort! job)))
           (then job
             (fn [v]
-              (let [ret (if (and (instance? Throwable v) @wrap-error?)
-                          (ex-info (str "Failed to evaluate " k)
-                            {::level (:level this)
-                             ::task k}
+              (let [ret (if (instance? Throwable v)
+                          (if @wrap-error?
+                            (ex-info (str "Failed to evaluate " k)
+                              {::level (:level this)
+                               ::task k}
+                              v)
                             v)
                           (do
                             (when close
