@@ -181,7 +181,9 @@
 
 (def ^:dynamic ^:private *app* nil)
 
-(defn swap [f & args]
+(defn swap
+  "Update the current spec by applying f to a spec value and args."
+  [f & args]
   (if *app*
     (apply swap! *app* f args)
     (if-let [v @(spec-var-atom)]
@@ -192,11 +194,30 @@
   nil)
 
 (defn define
-  [& args]
-  (apply swap define* args))
+  "Define a task k in the current spec.
 
-(defn include [app]
-  (swap merge app))
+  Examples:
+    (application app)
+
+    (define :a 1)         ; define a value :a
+
+    (define :b            ; define a task (computable value) :b
+      :args [:a]
+      :fn inc)
+
+    (define :resource
+      :close #(.close %)  ; Make task closeable by providing cleanup function
+                          ; for result value (see stop!)
+      :pre [:foo :bar]    ; Specifiy task prerequisites, that do not need to be passed as arguments
+    )
+  "
+  [k & args]
+  (apply swap define* k args))
+
+(defn include
+  "Merge tasks from the given spec into the current."
+  [spec]
+  (swap merge spec))
 
 (defmacro application
   "Declares a new Var initialized with an empty spec, i.e. (def name {}).
@@ -232,7 +253,7 @@
        ~@body)))
 
 (defmacro with-app
-  "Extend the given app with define, include or swap
+  "Extend the given app with define, include or swap functions
 
   Examples:
     (with-app {:a {:value 1}}
