@@ -50,14 +50,15 @@ App instance forms a runtime level. Levels might be named.
 
 ```clojure
 (def app (start spec)) ; base level (has an :app name by default)
-(def request (start app :request {})) ; next level instance, it shares spec with app and has a name :request
+(def request (start app :request {})) ; next level instance, it shares spec with app
+                                      ; and has a name :request
 ```
 
 Now, each task might be marked as belonging to a particular level.
 If so, we lookup entire app chain for a appropriate
 instance and do computations exactly on that. So, for example, if we want
 to share database connection between requests, we mark it as an `:app` level,
-so even if evaluated on request instance it will always be computed on app,
+even if evaluated on request instance it will always be computed on app,
 thus shared between requests.
 
 ```clojure
