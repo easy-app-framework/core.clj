@@ -58,7 +58,7 @@ Now, each task might be marked as belonging to a particular level.
 If so, we lookup entire app chain for a appropriate
 instance and do computations exactly on that. So, for example, if we want
 to share database connection between requests, we mark it as an `:app` level,
-even if evaluated on request instance it will always be computed on app,
+then, even if evaluated on request it will always be computed on app,
 thus shared between requests.
 
 ```clojure
