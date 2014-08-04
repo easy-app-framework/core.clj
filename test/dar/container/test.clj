@@ -26,7 +26,7 @@
 (deftest basic
   (with (start simple)
     (is (= (eval :a) "a"))
-    (is (= (eval :ab) "ab"))))
+    (is (= (:ab *app*) "ab"))))
 
 (application async)
 

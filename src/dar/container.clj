@@ -13,15 +13,24 @@
   "
   (:require [dar.async.promise :refer :all]))
 
-(defrecord App [spec state parent level stopped])
+(set! *warn-on-reflection* true)
+
+(declare evaluate)
+
+(deftype App [spec state parent level stopped]
+  clojure.lang.ILookup
+  (valAt [app k] (evaluate app k))
+  (valAt [app k not-found] (if (get spec k)
+                             (evaluate app k)
+                             not-found)))
 
 (defn start
   "Create a new container instance from either spec or another app.
   In latter case the given app will be used as parent."
   ([app level vals]
    (if (instance? App app)
-     (->App (:spec app) (atom vals) app level (new-promise))
-     (->App app (atom vals) nil level (new-promise))))
+     (App. (.-spec ^App app) (atom vals) app level (new-promise))
+     (App. app (atom vals) nil level (new-promise))))
   ([app vals]
    (start app nil vals))
   ([app]
@@ -29,24 +38,24 @@
 
 (defn stop!
   "Close all closeable values of the given instance."
-  [app]
-  (deliver! (:stopped app) true))
+  [^App app]
+  (deliver! (.-stopped app) true))
 
-(defn- lookup [app k]
-  (let [parent (:parent app)
-        vals @(:state app)
+(defn- lookup [^App app k]
+  (let [parent (.-parent app)
+        vals @(.-state app)
         val (get vals k ::nil)]
     (if (and (= ::nil val) parent)
       (recur parent k)
       val)))
 
-(defn- find-level [app level]
+(defn- ^App find-level [^App app level]
   (loop [this app]
     (cond
       (nil? level) app
       (nil? this) app
-      (= (:level this) level) this
-      :else (recur (:parent this)))))
+      (= (.-level this) level) this
+      :else (recur (.-parent this)))))
 
 (declare do-eval do-eval-fn)
 
@@ -85,13 +94,13 @@
        (deliver! p init)
        init))))
 
-(defn- do-eval [app k]
-  (if-let [task (-> app :spec (get k))]
+(defn- do-eval [^App app k]
+  (if-let [task (-> app .-spec (get k))]
     (let [v (get task :value ::nil)]
       (if (= v ::nil)
         (do-eval-fn app k task)
         (do
-          (swap! (:state app) assoc k v)
+          (swap! (.-state app) assoc k v)
           v)))
     (IllegalArgumentException. (str "Task " k " is not defined"))))
 
@@ -101,9 +110,9 @@
    `(lazy-seq
       (cons ~form (steps ~@rest)))))
 
-(defn- do-eval-fn [app k {f :fn :keys [args pre level close]}]
+(defn- do-eval-fn [^App app k {f :fn :keys [args pre level close]}]
   (let [this (find-level app level)
-        state (:state this)
+        state (.-state this)
         aborted (new-promise)
         p (new-promise (fn [_]
                          (deliver! aborted true)))]
@@ -146,7 +155,7 @@
                             v)
                           (do
                             (when close
-                              (then (:stopped this)
+                              (then (.-stopped this)
                                 (fn [_]
                                   (try
                                     (close v)
