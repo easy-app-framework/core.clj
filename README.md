@@ -124,6 +124,10 @@ clojure vars like manner.
 All presented functions are defined in a single `dar.container` namespace.
 Please refer to inline docs for complete list of options.
 
+##Credits
+
+This work was initially inspired by [The-Kiln](https://github.com/straszheimjeffrey/The-Kiln)
+
 
 ## License
 
