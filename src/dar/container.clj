@@ -274,3 +274,13 @@
   `(binding [*app* (atom ~app)]
      ~@body
      @*app*))
+
+(defn requires
+  "Returns a list of tasks that are used as dependecies but not defined.
+  Convenient for exploring third-party specs."
+  [spec]
+  (filter #(not (contains? spec %))
+    (apply concat
+      (map (fn [[_ t]]
+             (concat (:pre t) (:args t)))
+        spec))))
