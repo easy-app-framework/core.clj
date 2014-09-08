@@ -177,7 +177,7 @@
 (defn define* [spec k & args]
   (assoc spec k
     (if (odd? (count args))
-      (let [[v {:as opts}] args]
+      (let [[v & {:as opts}] args]
         (assoc opts :value v))
       (let [{:as opts} args]
         (merge
