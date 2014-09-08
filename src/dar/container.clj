@@ -1,15 +1,15 @@
 (ns dar.container
   "Examples:
-    (application app)
+  (application app)
 
-    (define :a 1)
-    (define :b 2)
+  (define :a 1)
+  (define :b 2)
 
-    (define :ab
-      :args [:a :b]
-      :fn +)
+  (define :ab
+  :args [:a :b]
+  :fn +)
 
-    (evaluate (start app) :ab) => 3
+  (evaluate (start app) :ab) => 3
   "
   (:require [dar.async.promise :refer :all]))
 
@@ -172,13 +172,17 @@
 ;; Spec API
 ;;
 
-(defn define*
-  ([spec k v]
-   (assoc spec k {:value v}))
-  ([spec k opt-k opt-v & {:as opts}]
-   (assoc spec k (merge
-                   {:args [] :fn (fn noop [& _])}
-                   (assoc opts opt-k opt-v)))))
+(defn noop [& _])
+
+(defn define* [spec k & args]
+  (assoc spec k
+    (if (odd? (count args))
+      (let [[v {:as opts}] args]
+        (assoc opts :value v))
+      (let [{:as opts} args]
+        (merge
+          {:args [] :fn #(throw (Exception. "Definition not provided"))}
+          opts)))))
 
 (defn spec-var-atom []
   (var-get
@@ -208,19 +212,19 @@
   "Define a task k in the current spec.
 
   Examples:
-    (application app)
+  (application app)
 
-    (define :a 1)         ; define a value :a
+  (define :a 1)         ; define a value :a
 
-    (define :b            ; define a task (computable value) :b
-      :args [:a]
-      :fn inc)
+  (define :b            ; define a task (computable value) :b
+  :args [:a]
+  :fn inc)
 
-    (define :resource
-      :close #(.close %)  ; Make task closeable by providing cleanup function
-                          ; for result value (see stop!)
-      :pre [:foo :bar]    ; Specifiy task prerequisites, that do not need to be passed as arguments
-    )
+  (define :resource
+  :close #(.close %)  ; Make task closeable by providing cleanup function
+  ; for result value (see stop!)
+  :pre [:foo :bar]    ; Specifiy task prerequisites, that do not need to be passed as arguments
+  )
   "
   [k & args]
   (apply swap define* k args))
@@ -235,14 +239,14 @@
   Use define, include or swap to add task definitions.
 
   Examples:
-    (application foo)
-    (define :a 1)
+  (application foo)
+  (define :a 1)
 
-    (application bar)
-    (define :a 2)
+  (application bar)
+  (define :a 2)
 
-    foo => {:a {:value 1}}
-    bar => {:a {:value 2}}
+  foo => {:a {:value 1}}
+  bar => {:a {:value 2}}
   "
   [name]
   `(reset! (spec-var-atom)
@@ -250,13 +254,13 @@
 
 (defmacro defapp
   "Like (application ...), but it doesn't use Var hacks,
-   allows only in-place definitions.
+  allows only in-place definitions.
 
   Examples:
-    (defapp foo
-      (define :a 1))
+  (defapp foo
+  (define :a 1))
 
-    foo => {:a {:value 1}}
+  foo => {:a {:value 1}}
   "
   [name & body]
   `(def ~name
@@ -267,8 +271,8 @@
   "Extend the given app with define, include or swap functions
 
   Examples:
-    (with-app {:a {:value 1}}
-      (define :b 2)) => {:a {:value 1}, :b {:value 2}}
+  (with-app {:a {:value 1}}
+  (define :b 2)) => {:a {:value 1}, :b {:value 2}}
   "
   [app & body]
   `(binding [*app* (atom ~app)]
