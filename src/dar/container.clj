@@ -149,7 +149,7 @@
               (let [ret (if (instance? Throwable v)
                           (if @wrap-error?
                             (ex-info (str "Failed to evaluate " k)
-                              {::level (:level this)
+                              {::level (.-level this)
                                ::task k}
                               v)
                             v)
