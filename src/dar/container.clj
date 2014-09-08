@@ -134,7 +134,7 @@
                                         (aset arguments idx v)
                                         (inc idx))
                           0
-                          (map #(if (= % ::app)
+                          (map #(if (= % ::self)
                                   this
                                   (evaluate this %))
                             args))
