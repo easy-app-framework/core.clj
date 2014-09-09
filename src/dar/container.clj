@@ -68,6 +68,17 @@
       (do-eval app k)
       val)))
 
+(defn- wait-for-promise [x]
+  (let [p (promise)
+        _ (then x #(deliver p %))
+        ret @p]
+    (when (instance? Throwable ret)
+      (throw ret))
+    ret))
+
+(defn <?!evaluate [app k]
+  (wait-for-promise (evaluate app k)))
+
 (defn- async-reduce
   ([xs] (async-reduce (fn [_ x] x) nil xs))
   ([f init xs] (async-reduce f init xs nil nil))
