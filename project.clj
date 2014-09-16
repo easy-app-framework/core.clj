@@ -1,4 +1,4 @@
-(defproject dar/container "0.2.0-SNAPSHOT"
+(defproject dar/container "0.2.0"
   :description "Dependency injection container"
   :url "https://github.com/dar-clojure/container"
   :license {:name "Eclipse Public License"
