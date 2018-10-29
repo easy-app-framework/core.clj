@@ -1,301 +1,257 @@
 (ns dar.container
-  "Examples:
-  (application app)
+  (:require [clojure.spec.alpha :as s])
+  (:import (java.util HashSet ArrayList)))
 
-  (define :a 1)
-  (define :b 2)
-
-  (define :ab
-  :args [:a :b]
-  :fn +)
-
-  (evaluate (start app) :ab) => 3
-  "
-  (:require [dar.async.promise :refer :all]))
 
 (set! *warn-on-reflection* true)
 
-(declare evaluate)
 
-(deftype App [spec state parent level stopped]
-  clojure.lang.ILookup
-  (valAt [app k] (evaluate app k))
-  (valAt [app k not-found] (if (get spec k)
-                             (evaluate app k)
-                             not-found)))
+(defn level? [obj] (contains? obj :main))
+(defn fun?   [obj] (contains? obj :fn))
+(defn const? [obj] (contains? obj :value))
 
-(defn start
-  "Create a new container instance from either spec or another app.
-  In latter case the given app will be used as parent."
-  ([app level vals]
-   (if (instance? App app)
-     (App. (.-spec ^App app) (atom vals) app level (new-promise))
-     (App. app (atom vals) nil level (new-promise))))
-  ([app vals]
-   (start app nil vals))
-  ([app]
-   (start app {})))
 
-(defn stop!
-  "Close all closeable values of the given instance."
-  [^App app]
-  (deliver! (.-stopped app) true))
-
-(defn- lookup [^App app k]
-  (let [parent (.-parent app)
-        vals @(.-state app)
-        val (get vals k ::nil)]
-    (if (and (= ::nil val) parent)
-      (recur parent k)
-      val)))
-
-(defn- ^App find-level [^App app level]
-  (loop [this app]
-    (cond
-      (nil? level) app
-      (nil? this) app
-      (= (.-level this) level) this
-      :else (recur (.-parent this)))))
-
-(declare do-eval do-eval-fn)
-
-(defn evaluate
-  "Evaluate the task k. If computation is async returns
-  a promise, otherwise result value (which might be an Exception)."
-  [app k]
-  (let [val (lookup app k)]
-    (if (= ::nil val)
-      (do-eval app k)
-      val)))
-
-(defn- wait-for-promise [x]
-  (let [p (promise)
-        _ (then x #(deliver p %))
-        ret @p]
-    (when (instance? Throwable ret)
-      (throw ret))
-    ret))
-
-(defn <?!evaluate [app k]
-  (wait-for-promise (evaluate app k)))
-
-(defn- async-reduce
-  ([xs] (async-reduce (fn [_ x] x) nil xs))
-  ([f init xs] (async-reduce f init xs nil nil))
-  ([f init xs p current]
-   (if (seq xs)
-     (let [x (first xs)]
-       (if (delivered? x)
-         (let [v (value x)]
-           (if (instance? Throwable v)
-             (if p (deliver! p v)  v)
-             (recur f (f init v) (next xs) p current)))
-         (let [current (or current (atom nil))
-               p (or p (new-promise (fn [_]
-                                      (when-let [x @current]
-                                        (abort! x)))))]
-           (reset! current x)
-           (then x (fn [v]
-                     (reset! current nil)
-                     (if (instance? Throwable v)
-                       (deliver! p v)
-                       (async-reduce f (f init v) (next xs) p current))))
-           p)))
-     (if p
-       (deliver! p init)
-       init))))
-
-(defn- do-eval [^App app k]
-  (if-let [task (-> app .-spec (get k))]
-    (let [v (get task :value ::nil)]
-      (if (= v ::nil)
-        (do-eval-fn app k task)
-        (do
-          (swap! (.-state app) assoc k v)
-          v)))
-    (IllegalArgumentException. (str "Task " k " is not defined"))))
-
-(defmacro ^:private steps
-  ([] `nil)
-  ([form & rest]
-   `(lazy-seq
-      (cons ~form (steps ~@rest)))))
-
-(defn- do-eval-fn [^App app k {f :fn :keys [args pre level close]}]
-  (let [this (find-level app level)
-        state (.-state this)
-        aborted (new-promise)
-        p (new-promise (fn [_]
-                         (deliver! aborted true)))]
-
-    (swap! state #(if (= (get % k ::nil) ::nil)
-                    (assoc % k p)
-                    %))
-
-    (let [out (get @state k)]
-      (when (identical? p out)
-        (let [arguments (object-array (count args))
-              wrap-error? (atom false)
-              job (async-reduce
-                    (concat
-                      (when (seq pre)
-                        (map #(evaluate this %) pre))
-                      (steps
-                        (async-reduce (fn [idx v]
-                                        (aset arguments idx v)
-                                        (inc idx))
-                          0
-                          (map #(if (= % ::self)
-                                  this
-                                  (evaluate this %))
-                            args))
-                        (try
-                          (reset! wrap-error? true)
-                          (apply f arguments)
-                          (catch Throwable e
-                            e)))))]
-          (then aborted (fn [_] (abort! job)))
-          (then job
-            (fn [v]
-              (let [ret (if (instance? Throwable v)
-                          (if @wrap-error?
-                            (ex-info (str "Failed to evaluate " k)
-                              {::level (.-level this)
-                               ::task k}
-                              v)
-                            v)
+(defn- walk
+  ([children pre post graph main]
+   (let [visited (new HashSet)
+         traverse (fn traverse [g k]
+                    (if (.contains visited k)
+                      g
+                      (let [g (pre g k)]
+                        (if (reduced? g)
                           (do
-                            (when close
-                              (then (.-stopped this)
-                                (fn [_]
-                                  (try
-                                    (close v)
-                                    (catch Throwable e
-                                      (println e))))))
-                            v))]
-                (swap! state assoc k ret)
-                (deliver! out ret))))))
-      (if (delivered? out)
-        (value out)
-        out))))
+                            (.add visited k)
+                            (deref g))
+                          (let [g (reduce traverse g (children g k))]
+                            (.add visited k)
+                            (post g k))))))]
+     (traverse graph main)))
 
-;;
-;; Spec API
-;;
+  ([on-cycle children pre post graph main]
+    (let [visited (new HashSet)
+          path (new ArrayList)
+          traverse (fn traverse [g k]
+                     (cond
+                       (.contains visited k) g
+                       (.contains path k) (do
+                                            (on-cycle g k (vec path))
+                                            (.add visited k)
+                                            g)
+                       :else (let [g (pre g k)]
+                               (if (reduced? g)
+                                 (do
+                                   (.add visited k)
+                                   (deref g))
+                                 (do
+                                   (.add path k)
+                                   (let [g (reduce traverse g (children g k))]
+                                     (.remove path (dec (.size path)))
+                                     (.add visited k)
+                                     (post g k)))))))]
+      (traverse graph main))))
 
-(defn noop [& _])
 
-(defn define* [spec k & args]
-  (assoc spec k
-    (if (odd? (count args))
-      (let [[v & {:as opts}] args]
-        (assoc opts :value v))
-      (let [{:as opts} args]
-        (merge
-          {:args [] :fn #(throw (Exception. "Definition not provided"))}
-          opts)))))
+(defn- ex-cycle [path]
+  (ex-info "Cycle detected" {::graph-error :cycle ::cycle path}))
 
-(defn spec-var-atom []
-  (var-get
-    (or
-      (find-var (symbol
-                  (name (ns-name *ns*))
-                  (name '*dar-container-spec*)))
-      (intern *ns*
-        (with-meta '*dar-container-spec* {:private true})
-        (atom nil)))))
 
-(def ^:dynamic ^:private *app* nil)
+(defn- throw-on-cycle [g k path]
+  (throw (ex-cycle (conj path k))))
 
-(defn swap
-  "Update the current spec by applying f to a spec value and args."
-  [f & args]
-  (if *app*
-    (apply swap! *app* f args)
-    (if-let [v @(spec-var-atom)]
-      (apply alter-var-root v f args)
-      (throw (IllegalStateException.
-               "This function must be called only within a (with-app ...) form
-               or after (application ...) declaration."))))
-  nil)
 
-(defn define
-  "Define a task k in the current spec.
+(defn- fun-deps [node]
+  (concat (:pre node)
+          (filter #(not= % :eval) (:args node))
+          (:uses node)))
 
-  Examples:
-  (application app)
 
-  (define :a 1)         ; define a value :a
+(defn- derive-level-list [graph]
+  (walk (fn on-cycle [g k path]
+          (when-not (level? (g k))
+            (throw-on-cycle g k path)))
+        (fn children [g k]
+          (let [node (g k)]
+            (cond
+              (fun? node) (fun-deps node)
+              (level? node) [(node :main)]
+              :else nil)))
+        (fn pre [g _] g)
+        (fn post [g k]
+          (if (level? (g k))
+            (update g ::levels conj k)
+            g))
+        (assoc graph ::levels [])
+        ::main-level))
 
-  (define :b            ; define a task (computable value) :b
-  :args [:a]
-  :fn inc)
 
-  (define :resource
-  :close #(.close %)  ; Make task closeable by providing cleanup function
-  ; for result value (see stop!)
-  :pre [:foo :bar]    ; Specifiy task prerequisites, that do not need to be passed as arguments
-  )
-  "
-  [k & args]
-  (apply swap define* k args))
+(defn- dependencies [graph k]
+  (let [node (graph k)]
+    (cond
+      (fun? node) (fun-deps node)
+      (const? node) nil
+      (level? node) (node ::deps)
+      :else (throw (IllegalArgumentException. "Unknown node type")))))
 
-(defn include
-  "Merge tasks from the given spec into the current."
-  [spec]
-  (swap merge spec))
 
-(defmacro application
-  "Declares a new Var initialized with an empty spec, i.e. (def name {}).
-  Use define, include or swap to add task definitions.
+(defn- derive-level-nodes [graph level-key]
+  (let [{main :main args :args} (graph level-key)
+        args-set (set args)
+        g (walk throw-on-cycle
+                dependencies
+                (fn pre [g k]
+                  (cond
+                    (contains? args-set k) (reduced g)
+                    (and (= level-key ::main-level) (empty? (dependencies g k))) (reduced (update g ::nodes conj k))
+                    :else g))
+                (fn post [{nodes ::nodes :as g} k]
+                  (if (some nodes (dependencies g k))
+                    (update g ::nodes conj k)
+                    g))
+                (assoc graph ::nodes (reduce conj #{} args))
+                main)]
+    (assoc-in graph [level-key ::nodes] (g ::nodes))))
 
-  Examples:
-  (application foo)
-  (define :a 1)
 
-  (application bar)
-  (define :a 2)
+(defn- derive-level-deps [graph level-key]
+  (let [{main :main args :args nodes ::nodes} (graph level-key)
+        args-set (set args)
+        g (walk dependencies
+                (fn pre [g k]
+                  (cond
+                    (contains? args-set k) (reduced g)
+                    (contains? nodes k) g
+                    (level? (g k)) g
+                    :else (reduced (update g ::deps conj k))))
+                (fn post [g _] g)
+                (assoc graph ::deps #{})
+                main)]
+    (assoc-in graph [level-key ::deps] (g ::deps))))
 
-  foo => {:a {:value 1}}
-  bar => {:a {:value 2}}
-  "
-  [name]
-  `(reset! (spec-var-atom)
-     (def ~name {})))
 
-(defmacro defapp
-  "Like (application ...), but it doesn't use Var hacks,
-  allows only in-place definitions.
+(defn- derive-level-roots-and-shared-nodes [graph level-key]
+  (let [{main :main :as level} (graph level-key)
+        nodes (reduce disj (::nodes level) (:args level))
+        grouped-dependencies (fn [g k]
+                               (let [node (g k)
+                                     strict (new ArrayList)
+                                     lazy (new ArrayList)
+                                     shared (new ArrayList)
+                                     add-shared (fn add-shared [deps]
+                                                  (doseq [d deps :when (nodes d) :let [n (g d)]]
+                                                    (cond
+                                                      (fun? n) (.add shared d)
+                                                      (level? n) (add-shared (::deps n)))))
+                                     uses? (volatile! false)]
+                                 (assert (fun? node))
+                                 (doseq [d (:pre node) :when (and (nodes d) (fun? (g d)))]
+                                   (.add strict d))
+                                 (doseq [a (:args node)]
+                                   (if (= a :eval)
+                                     (vreset! uses? true)
+                                     (when (nodes a)
+                                       (let [n (g a)]
+                                         (cond
+                                           (fun? n) (if (contains? (:lazy node) a)
+                                                      (.add lazy a)
+                                                      (.add strict a))
+                                           (level? n) (add-shared (::deps n)))))))
+                                 (when @uses?
+                                   (add-shared (:uses node)))
+                                 [strict lazy shared]))
+        sorted-nodes (::nodes (walk (fn children [g k]
+                                      (apply concat (grouped-dependencies g k)))
+                                    (fn pre [g k] g)
+                                    (fn post [g k]
+                                      (update g ::nodes #(cons k %)))
+                                    graph
+                                    main))
+        shared (atom #{})
+        root-of (atom {})
+        requests (atom {})
+        acc-request (fn [k root kind idx]
+                      (swap! requests update k (fnil conj []) [root kind idx]))
+        min-request (fn [rs]
+                      (reduce (fn [[root kind shared? idx] [r k i]]
+                                (let [shared? (or shared? (= k :shared))]
+                                  (if (< i idx)
+                                    [r k shared? i]
+                                    [root kind shared? idx])))
+                              [nil nil false Integer/MAX_VALUE]
+                              rs))]
+    (doseq [[k idx] (map vector sorted-nodes (range))]
+      (let [rs (@requests k)
+            [min-req-root min-req-kind shared? _] (min-request rs)
+            root (if (and (= min-req-kind :strict)
+                          (or (= min-req-root main)
+                              (= 1 (count (reduce (fn [roots req]
+                                                    (conj roots (first req)))
+                                                  #{}
+                                                  rs)))))
+                   (do
+                     (when shared?
+                       (swap! shared conj k))
+                     min-req-root)
+                   k)
+            [strict lazy shared] (grouped-dependencies graph k)]
+        (swap! root-of assoc k root)
+        (doseq [d strict]
+          (acc-request d root :strict idx))
+        (doseq [d lazy]
+          (acc-request d root :lazy idx))
+        (doseq [d shared]
+          (acc-request d root :shared idx))))
+    (update graph level-key assoc ::root-of @root-of ::shared @shared)))
 
-  Examples:
-  (defapp foo
-  (define :a 1))
 
-  foo => {:a {:value 1}}
-  "
-  [name & body]
-  `(def ~name
-     (with-app {}
-       ~@body)))
+(defn- reduce-levels [graph f]
+  (reduce f graph (graph ::levels)))
 
-(defmacro with-app
-  "Extend the given app with define, include or swap functions
 
-  Examples:
-  (with-app {:a {:value 1}}
-  (define :b 2)) => {:a {:value 1}, :b {:value 2}}
-  "
-  [app & body]
-  `(binding [*app* (atom ~app)]
-     ~@body
-     @*app*))
+(defn- analyze [graph main args]
+  (-> graph
+      (assoc ::main-level {:main main :args args})
+      derive-level-list
+      (reduce-levels derive-level-nodes)
+      (reduce-levels derive-level-deps)
+      (reduce-levels derive-level-nodes)
+      (reduce-levels derive-level-deps)
+      (reduce-levels derive-level-roots-and-shared-nodes)))
 
-(defn requires
-  "Returns a list of tasks that are used as dependecies but not defined.
-  Convenient for exploring third-party specs."
-  [spec]
-  (filter #(not (contains? spec %))
-    (apply concat
-      (map (fn [[_ t]]
-             (concat (:pre t) (:args t)))
-        spec))))
+
+(defn- sym [kind k])
+
+
+(defn- evaluate [node-key uses self k]
+  (if (contains? uses k)
+    (self k)
+    (throw (IllegalArgumentException. (str k " is not specified as a dependency of " node-key)))))
+
+
+(defn update-app [app f & args]
+  (if (instance? clojure.lang.Atom app)
+    (apply swap! app f args)
+    (apply f app args)))
+
+
+(defn unwrap-app [app]
+  (if (instance? clojure.lang.Atom app)
+    @app
+    app))
+
+
+(defn define [app k & {:as d}]
+  (update-app app assoc k d))
+
+
+(defn define-level [app k main args]
+  (update-app app assoc k {:main main :args args}))
+
+
+(defn define-constant [app k value]
+  (update-app app assoc k {:value value}))
+
+
+(defn compile-app [app main args]
+  (-> app
+      unwrap-app
+      (analyze main args)))
