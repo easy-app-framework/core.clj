@@ -147,9 +147,10 @@
                                main
                                (fn children [graph k]
                                  (apply concat (grouped-dependencies graph k)))
-                               conj
                                pass
-                               [])
+                               (fn post [nodes k]
+                                 (cons k nodes))
+                               nil)
         shared (atom #{})
         root-of (atom {})
         requests (atom {})
@@ -201,7 +202,9 @@
 
 
 (defn- sym [kind k]
-  (symbol (str (name kind) "-" (name k))))
+  (case kind
+    :val (symbol (name k))
+    (symbol (str (name kind) "-" (name k)))))
 
 
 (defn- debug [x]
@@ -209,7 +212,7 @@
   x)
 
 
-(defn- gen-root-computation [graph level-key level-node root]
+(defn gen-root-computation [graph level-key level-node root]
   (let [{root-of ::root-of nodes ::nodes shared ::shared main :main args :args} level-node
         seeds (set args)
 
@@ -303,16 +306,17 @@
                                                            (when (shared k)
                                                              (.add deferred [::state]))
 
-                                                           (concat deferred (reverse strict))))
+                                                           (concat strict deferred)))
 
                                   (and (= root main) (nodes k)) [[::state]]
 
                                   (and (not= root main) (not (nodes k))) [[::parent]]
 
                                   :else nil)))
-                            conj
                             pass
-                            [])))))
+                            (fn post [nodes k]
+                              (cons k nodes))
+                            nil)))))
 
 
 (defn update-app [app f & args]
