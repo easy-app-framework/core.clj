@@ -11,77 +11,67 @@
 (defn const? [obj] (contains? obj :value))
 
 
-(defn- walk
-  ([children pre post graph main]
-   (let [visited (new HashSet)
-         traverse (fn traverse [g k]
-                    (if (.contains visited k)
-                      g
-                      (let [g (pre g k)]
-                        (if (reduced? g)
-                          (do
-                            (.add visited k)
-                            (deref g))
-                          (let [g (reduce traverse g (children g k))]
-                            (.add visited k)
-                            (post g k))))))]
-     (traverse graph main)))
+(defn- walk-dag [graph main children pre post s]
+  (let [visited (new HashSet)
+        traverse (fn traverse [s k]
+                   (if (.contains visited k)
+                     s
+                     (do
+                       (.add visited k)
+                       (let [s (pre s k)]
+                         (if (reduced? s)
+                           (deref s)
+                           (post (reduce traverse s (children graph k)) k))))))]
+    (traverse s main)))
 
-  ([on-cycle children pre post graph main]
+
+(defn- walk [graph main children pre post s]
     (let [visited (new HashSet)
           path (new ArrayList)
-          traverse (fn traverse [g k]
+          traverse (fn traverse [s k]
                      (cond
-                       (.contains visited k) g
+                       (.contains visited k) s
                        (.contains path k) (do
-                                            (on-cycle g k (vec path))
-                                            (.add visited k)
-                                            g)
-                       :else (let [g (pre g k)]
-                               (if (reduced? g)
+                                            (.add path k)
+                                            (throw (ex-info "Cycle detected" {::graph-error :cycle ::cycle (vec path)})))
+                       :else (let [s (pre s k)]
+                               (if (reduced? s)
                                  (do
                                    (.add visited k)
-                                   (deref g))
+                                   (deref s))
                                  (do
                                    (.add path k)
-                                   (let [g (reduce traverse g (children g k))]
+                                   (let [s (reduce traverse s (children graph k))]
                                      (.remove path (dec (.size path)))
                                      (.add visited k)
-                                     (post g k)))))))]
-      (traverse graph main))))
+                                     (post s k)))))))]
+      (traverse s main)))
 
 
-(defn- ex-cycle [path]
-  (ex-info "Cycle detected" {::graph-error :cycle ::cycle path}))
+(defn- pass [s k] s)
 
 
-(defn- throw-on-cycle [g k path]
-  (throw (ex-cycle (conj path k))))
-
-
-(defn- fun-deps [node]
-  (concat (:pre node)
-          (filter #(not= % :eval) (:args node))
-          (:uses node)))
+(defn- fun-deps [{pre :pre args :args uses :uses}]
+  (concat pre (filter #(not= % :eval) args) (when (and (seq uses)
+                                                       (some #{:eval} args))
+                                              uses)))
 
 
 (defn- derive-level-list [graph]
-  (walk (fn on-cycle [g k path]
-          (when-not (level? (g k))
-            (throw-on-cycle g k path)))
-        (fn children [g k]
-          (let [node (g k)]
-            (cond
-              (fun? node) (fun-deps node)
-              (level? node) [(node :main)]
-              :else nil)))
-        (fn pre [g _] g)
-        (fn post [g k]
-          (if (level? (g k))
-            (update g ::levels conj k)
-            g))
-        (assoc graph ::levels [])
-        ::main-level))
+  (assoc graph ::levels (walk graph
+                              ::main-level
+                              (fn children [graph k]
+                                (let [node (graph k)]
+                                  (cond
+                                    (fun? node) (fun-deps node)
+                                    (level? node) [(node :main)]
+                                    :else nil)))
+                              pass
+                              (fn post [levels k]
+                                (if (level? (graph k))
+                                  (conj levels k)
+                                  levels))
+                              [])))
 
 
 (defn- dependencies [graph k]
@@ -89,67 +79,62 @@
     (cond
       (fun? node) (fun-deps node)
       (const? node) nil
-      (level? node) (node ::deps)
+      (level? node) (::deps node)
       :else (throw (IllegalArgumentException. "Unknown node type")))))
 
 
-(defn- derive-level-nodes [graph level-key]
+(defn- derive-level-nodes-and-deps [graph level-key]
   (let [{main :main args :args} (graph level-key)
-        args-set (set args)
-        g (walk throw-on-cycle
-                dependencies
-                (fn pre [g k]
-                  (cond
-                    (contains? args-set k) (reduced g)
-                    (and (= level-key ::main-level) (empty? (dependencies g k))) (reduced (update g ::nodes conj k))
-                    :else g))
-                (fn post [{nodes ::nodes :as g} k]
-                  (if (some nodes (dependencies g k))
-                    (update g ::nodes conj k)
-                    g))
-                (assoc graph ::nodes (reduce conj #{} args))
-                main)]
-    (assoc-in graph [level-key ::nodes] (g ::nodes))))
-
-
-(defn- derive-level-deps [graph level-key]
-  (let [{main :main args :args nodes ::nodes} (graph level-key)
-        args-set (set args)
-        g (walk dependencies
-                (fn pre [g k]
-                  (cond
-                    (contains? args-set k) (reduced g)
-                    (contains? nodes k) g
-                    (level? (g k)) g
-                    :else (reduced (update g ::deps conj k))))
-                (fn post [g _] g)
-                (assoc graph ::deps #{})
-                main)]
-    (assoc-in graph [level-key ::deps] (g ::deps))))
+        seeds (set args)
+        nodes (walk-dag graph
+                        main
+                        dependencies
+                        (fn pre [nodes k]
+                          (cond
+                            (seeds k) (reduced nodes)
+                            (and (= level-key ::main-level) (empty? (dependencies graph k))) (reduced (conj nodes k))
+                            :else nodes))
+                        (fn post [nodes k]
+                          (if (some nodes (dependencies graph k))
+                            (conj nodes k)
+                            nodes))
+                        seeds)
+        deps (walk-dag graph
+                       main
+                       dependencies
+                       (fn pre [deps k]
+                         (cond
+                           (seeds k) (reduced deps)
+                           (nodes k) deps
+                           :else (reduced (conj deps k))))
+                       pass
+                       #{})]
+    (update graph level-key assoc ::nodes nodes ::deps deps)))
 
 
 (defn- derive-level-roots-and-shared-nodes [graph level-key]
-  (let [{main :main :as level} (graph level-key)
-        nodes (reduce disj (::nodes level) (:args level))
-        grouped-dependencies (fn [g k]
-                               (let [node (g k)
+  (assert (fun? (graph (-> graph level-key :main))))
+  (let [{main :main args :args nodes ::nodes} (graph level-key)
+        nodes (reduce disj nodes args)
+        grouped-dependencies (fn [graph k]
+                               (let [node (graph k)
                                      strict (new ArrayList)
                                      lazy (new ArrayList)
                                      shared (new ArrayList)
                                      add-shared (fn add-shared [deps]
-                                                  (doseq [d deps :when (nodes d) :let [n (g d)]]
+                                                  (doseq [d deps :when (nodes d) :let [n (graph d)]]
                                                     (cond
                                                       (fun? n) (.add shared d)
                                                       (level? n) (add-shared (::deps n)))))
                                      uses? (volatile! false)]
                                  (assert (fun? node))
-                                 (doseq [d (:pre node) :when (and (nodes d) (fun? (g d)))]
+                                 (doseq [d (:pre node) :when (and (nodes d) (fun? (graph d)))]
                                    (.add strict d))
                                  (doseq [a (:args node)]
                                    (if (= a :eval)
                                      (vreset! uses? true)
                                      (when (nodes a)
-                                       (let [n (g a)]
+                                       (let [n (graph a)]
                                          (cond
                                            (fun? n) (if (contains? (:lazy node) a)
                                                       (.add lazy a)
@@ -158,13 +143,13 @@
                                  (when @uses?
                                    (add-shared (:uses node)))
                                  [strict lazy shared]))
-        sorted-nodes (::nodes (walk (fn children [g k]
-                                      (apply concat (grouped-dependencies g k)))
-                                    (fn pre [g k] g)
-                                    (fn post [g k]
-                                      (update g ::nodes #(cons k %)))
-                                    graph
-                                    main))
+        sorted-nodes (walk-dag graph
+                               main
+                               (fn children [graph k]
+                                 (apply concat (grouped-dependencies graph k)))
+                               conj
+                               pass
+                               [])
         shared (atom #{})
         root-of (atom {})
         requests (atom {})
@@ -211,20 +196,123 @@
   (-> graph
       (assoc ::main-level {:main main :args args})
       derive-level-list
-      (reduce-levels derive-level-nodes)
-      (reduce-levels derive-level-deps)
-      (reduce-levels derive-level-nodes)
-      (reduce-levels derive-level-deps)
+      (reduce-levels derive-level-nodes-and-deps)
       (reduce-levels derive-level-roots-and-shared-nodes)))
 
 
-(defn- sym [kind k])
+(defn- sym [kind k]
+  (symbol (str (name kind) "-" (name k))))
 
 
-(defn- evaluate [node-key uses self k]
-  (if (contains? uses k)
-    (self k)
-    (throw (IllegalArgumentException. (str k " is not specified as a dependency of " node-key)))))
+(defn- debug [x]
+  (println x)
+  x)
+
+
+(defn- gen-root-computation [graph level-key level-node root]
+  (let [{root-of ::root-of nodes ::nodes shared ::shared main :main args :args} level-node
+        seeds (set args)
+
+        gen-fun-app (fn [k {args :args lazy :lazy}]
+                      `(~(sym :fn k) ~@(map (fn [arg]
+                                              (cond
+                                                (= arg :eval) `(fn [key]
+                                                                 (if (contains? ~(sym :uses k) key)
+                                                                   (~(sym :level-getter level-key) ~'state key)
+                                                                   (throw (IllegalArgumentException. (str key " is not specified as a dependency of " ~k)))))
+                                                (contains? lazy arg) (sym :lazy arg)
+                                                :else (sym :val arg)))
+                                            args)))
+
+        gen-value-exp-pair (fn [k lazy?]
+                             (let [node (graph k)
+                                   val-sym (fn []
+                                             (sym (if lazy? :lazy :val) k))
+                                   wrap-if-lazy (fn [exp]
+                                                  (if lazy?
+                                                    `(fn [] ~exp)
+                                                    exp))]
+                               (cond
+                                 (= k ::state) ['state `(new ~(sym :state-class level-key) ~'parent)]
+
+                                 (= k ::parent) ['parent `(. ~'state ~'parent)]
+
+                                 ;(= k ::self) ['self `(fn [k] (~(sym :level-getter level-key) ~'state k))]
+
+                                 (= root (root-of k)) [(val-sym) (if lazy?
+                                                                   `(fn [] ~(sym :val k))
+                                                                   (let [app (gen-fun-app k node)]
+                                                                     (if (shared k)
+                                                                       `(let [v ~app]
+                                                                          (set! (. ~'state ~(sym :state-field k)) v)
+                                                                          v)
+                                                                       app)))]
+
+                                 (seeds k) [(val-sym) (wrap-if-lazy
+                                                        (if (= root main)
+                                                          (sym :val k)
+                                                          `(. ~'state ~(sym :state-field k))))]
+
+                                 (shared k) [(val-sym) (wrap-if-lazy
+                                                         `(. ~'state ~(sym :state-field k)))]
+
+                                 (nodes k) [(val-sym) (wrap-if-lazy
+                                                        `(~(sym :level-getter level-key) ~'state ~k))]
+
+                                 :else [(val-sym) (wrap-if-lazy
+                                                    `(~'parent ~k))])))]
+
+    (reduce (fn [inner-form [k lazy?]]
+              `(let [~@(gen-value-exp-pair k lazy?)]
+                 ~inner-form))
+
+            (gen-fun-app root (graph root))
+
+            (next (walk-dag graph
+                            [root false]
+                            (fn children [graph [k lazy?]]
+                              (let [node (graph k)]
+                                (cond
+                                  (= k ::state) nil
+                                  (= k ::parent) nil
+                                  (= root (root-of k)) (when-not lazy?
+                                                         (let [strict (new ArrayList)
+                                                               deferred (new ArrayList)
+                                                               lazy (:lazy node)]
+
+                                                           (doseq [d (:pre node) :when (and (not (seeds d))
+                                                                                            (not (and (nodes d)
+                                                                                                      (not (fun? (graph d))))))]
+                                                             (.add strict [d false]))
+
+                                                           (doseq [d (:args node)]
+                                                             (cond
+                                                               (= d :eval) (when (= root main)
+                                                                             (.add deferred [::state]))
+
+                                                               (seeds d) (when (contains? lazy d)
+                                                                           (.add deferred [d true]))
+
+                                                               (and (nodes d)
+                                                                    (level? (graph d))) (.add deferred [d (contains? lazy d)])
+
+                                                               (not (const? (graph d))) (if (contains? lazy d)
+                                                                                          (.add deferred [d true])
+                                                                                          (.add strict [d false]))))
+
+                                                           (when (shared k)
+                                                             (.add deferred [::state]))
+
+                                                           (concat deferred (reverse strict))))
+
+                                  (and (= root main) (nodes k)) [[::state]]
+
+                                  (and (not= root main) (not (nodes k))) [[::parent]]
+
+                                  :else nil)))
+                            conj
+                            pass
+                            [])))))
 
 
 (defn update-app [app f & args]

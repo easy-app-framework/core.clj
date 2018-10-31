@@ -1,6 +1,11 @@
 (ns dar.container.test
   (:require [clojure.test :refer :all]
+            [clojure.pprint :as pp]
             [dar.container :refer :all :as c]))
+
+
+(defn pprint [s-exps]
+  (pp/with-pprint-dispatch pp/code-dispatch (pp/pprint s-exps)))
 
 
 (def analyze @#'dar.container/analyze)
