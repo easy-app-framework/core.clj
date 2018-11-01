@@ -55,9 +55,7 @@
     (is (= (-> g ::c/main-level ::c/root-of) {:main :main
                                               :ac   :ac
                                               :a    :a}))
-    (is (= (-> g ::c/main-level ::c/shared) #{}))
-    (pprint
-      (gen-root-computation g :foo (:foo g) :ab-ac))))
+    (is (= (-> g ::c/main-level ::c/shared) #{}))))
 
 
 (defn -main []
