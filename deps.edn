@@ -1,1 +1,2 @@
-{org.clojure/spec.alpha {:mvn/version "0.2.176"}}
+{:deps {org.clojure/spec.alpha {:mvn/version "0.2.176"}
+        insn {:mvn/version "0.3.1"}}}

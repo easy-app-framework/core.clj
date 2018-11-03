@@ -1,6 +1,8 @@
 (ns dar.container
   (:require [clojure.spec.alpha :as s]
-            [clojure.string :as st])
+            [clojure.string :as st]
+            [clojure.pprint :as pp]
+            [insn.core :as insn])
   (:import (java.util HashSet ArrayList HashMap)))
 
 
@@ -202,10 +204,27 @@
       (reduce-levels derive-level-roots-and-shared-nodes)))
 
 
+(def ^:private ^:dynamic ^HashSet *names* nil)
+(def ^:private ^:dynamic ^HashMap *bindings* nil)
+(def ^:private ^:dynamic ^clojure.lang.Symbol *package* nil)
+
+
+(defmacro ^:private with-fresh-names [& body]
+  `(binding [*names* (new HashSet)
+             *bindings* (new HashMap)
+             *package* (gensym "dar.container.state")]
+     (.add *names* 'state)
+     (.add *names* 'k)
+     (.add *names* 'parent)
+     (.add *names* 'graph)
+     ~@body))
+
+
 (defn- gen-name [kind k]
-  (let [n (if (namespace k)
-            (str (st/replace (namespace k) "." "-") "-" (name k))
-            (name k))]
+  (let [n (if (vector? k)
+            (st/join "-" k)
+            (str k))
+        n (-> n (st/replace "." "-") (st/replace "/" "-") (st/replace ":" ""))]
     (case kind
       :val n
       :lazy (str "lazy--" n)
@@ -213,26 +232,12 @@
       :root-fn (str "rfn--" n)
       :level-getter (str n "--get")
       :uses (str "uses--" n)
-      :state-class (str (apply str (map st/capitalize (st/split n (re-pattern "-"))))
+      :state-class (str *package* "." (apply str (map st/capitalize (st/split n (re-pattern "-"))))
                         "State")
       :state-field (let [parts (st/split n (re-pattern "-"))]
                      (apply str (first parts) (map st/capitalize (next parts))))
       :state-field-ready (apply str "isReady" (map st/capitalize (st/split n (re-pattern "-"))))
       (throw (IllegalArgumentException. (str "Unknown kind " k))))))
-
-
-(def ^:private ^:dynamic ^HashSet *names* nil)
-(def ^:private ^:dynamic ^HashMap *bindings* nil)
-
-
-(defmacro ^:private with-fresh-names [body]
-  (binding [*names* (new HashSet)
-            *bindings* (new HashMap)]
-    (.add *names* 'state)
-    (.add *names* 'k)
-    (.add *names* 'self)
-    (.add *names* 'parent)
-    ~@body))
 
 
 (defn- sym [kind k]
@@ -244,16 +249,9 @@
   x)
 
 
-(defn gen-root-fn [graph level-key root]
+(defn- gen-root-fn [graph level-key root]
   (let [{root-of ::root-of nodes ::nodes shared ::shared main :main args :args level-deps ::deps} (graph level-key)
         seeds (set args)
-
-        arguments (if (= root main)
-                    (let [args (map (partial sym :val) args)]
-                      (if (seq level-deps)
-                        (cons 'parent args)
-                        args))
-                    ['state])
 
         gen-fun-app (fn [k {args :args lazy :lazy}]
                       `(~(sym :fn k) ~@(map (fn [arg]
@@ -277,7 +275,13 @@
                               (cond
                                 (= k ::state) (do
                                                 (assert (= root main))
-                                                ['state `(new ~(sym :state-class level-key) ~@arguments)])
+                                                ['state `(let [s# (new ~(sym :state-class level-key))]
+                                                           ~@(when (seq level-deps)
+                                                               [`(set! (. s# ~'parent) ~'parent)])
+                                                           ~@(map (fn [a]
+                                                                    `(set! (. s# ~(sym :state-field a)) ~(sym :val a)))
+                                                                  args)
+                                                           s#)])
 
                                 (= k ::parent) (do
                                                  (assert (not= root main))
@@ -285,12 +289,12 @@
 
                                 (= root (root-of k)) [(val-sym) (if lazy?
                                                                   `(fn [] ~(sym :val k))
-                                                                  (let [app (gen-fun-app k node)]
+                                                                  (let [exp (gen-fun-app k node)]
                                                                     (if (shared k)
-                                                                      `(let [v ~app]
-                                                                         (set! (. ~'state ~(sym :state-field k)) v)
-                                                                         v)
-                                                                      app)))]
+                                                                      `(let [v# ~exp]
+                                                                         (set! (. ~'state ~(sym :state-field k)) v#)
+                                                                         v#)
+                                                                      exp)))]
 
                                 (seeds k) [(val-sym) (wrap-if-lazy
                                                        (if (= root main)
@@ -357,13 +361,20 @@
                        `(let [~@(gen-name-exp-pair k lazy?)]
                           ~inner-form))
                      (gen-fun-app root (graph root))
-                     (next names-seq))]
+                     (next names-seq))
 
-    `(fn [~@arguments]
+        arguments (if (= root main)
+                    (let [args (map (partial sym :val) args)]
+                      (if (seq level-deps)
+                        (cons 'parent args)
+                        args))
+                    ['state])]
+
+    `(~(sym :root-fn [level-key root]) [~@arguments]
        ~body)))
 
 
-(defn gen-level-getter [graph level-key]
+(defn- gen-level-getter [graph level-key]
   (let [{main :main args :args root-of ::root-of level-deps ::deps shared ::shared nodes ::nodes} (graph level-key)
         seeds (set args)
         cases (reduce (fn [cases k]
@@ -377,7 +388,7 @@
                                                                                (locking ~'state
                                                                                  (if (. ~'state ~(sym :state-field-ready k))
                                                                                    (. ~'state ~(sym :state-field k))
-                                                                                   (let [v# (~(sym :root-fn k) ~'state)]
+                                                                                   (let [v# (~(sym :root-fn [level-key k]) ~'state)]
                                                                                      (set! (. ~'state ~(sym :state-field k)) v#)
                                                                                      (set! (. ~'state ~(sym :state-field-ready k)) true)
                                                                                      v#)))))
@@ -385,16 +396,79 @@
                             (level? (graph k)) (let [{args :args deps ::deps} (graph k)
                                                      args (map (partial sym :val) args)]
                                                  (conj-exp `(fn [~@args]
-                                                              (~(sym :root-fn k) ~@(if (seq deps) ['self] nil) ~@args))))
+                                                              (~(sym :root-fn [level-key k]) ~@(if (seq deps)
+                                                                                                 [`(fn [k#]
+                                                                                                     (~(sym :level-getter level-key) ~'state k#))]
+                                                                                                 nil)
+                                                                ~@args))))
                             :else cases)))
                       []
                       (sort nodes))]
-    `(fn ~'self [~'state ~'k]
+    `(~(sym :level-getter level-key) [~'state ~'k]
        (case ~'k
          ~@cases
          ~(if (seq level-deps)
             `((. ~'state ~'parent) ~'k)
             `(throw (IllegalArgumentException. (str "Unknown node " ~'k))))))))
+
+
+(defn- gen-spec-bindings [graph]
+  (let [bindings (new ArrayList)
+        add (fn [s exp]
+              (.add bindings s)
+              (.add bindings exp))
+        nodes (reduce (fn [ns l]
+                        (let [{nodes ::nodes args :args} (graph l)]
+                          (reduce conj ns (reduce disj nodes args))))
+                      #{}
+                      (::levels graph))]
+
+    (doseq [k (sort nodes) :let [node (graph k)]]
+      (cond
+        (fun? node) (do
+                      (add (sym :fn k) `(:fn (~k ~'graph)))
+                      (when (and (:uses node)
+                                 (some #{:eval} (:args node)))
+                        (add (sym :uses k) `(:fn (~k ~'graph)))))
+
+        (const? node) (add (sym :val k) `(:value (~k ~'graph)))))
+
+    bindings))
+
+
+(defn- gen-state-classes [graph]
+  (for [k (::levels graph) :let [{args :args shared ::shared deps ::deps root-of ::root-of} (graph k)]]
+    (let [fields (new ArrayList)]
+      (when (seq deps)
+        (.add fields {:flags #{:public :volatile}
+                      :name  "parent"
+                      :type  'clojure.lang.IFn}))
+
+      (doseq [f (concat args shared)]
+        (.add fields {:flags #{:public :volatile}
+                      :name  (name (sym :state-field f))}))
+
+      (doseq [[n root] root-of :when (= n root)]
+        (.add fields {:flags #{:public :volatile}
+                      :name  (name (sym :state-field-ready root))
+                      :type  :boolean})
+        (.add fields {:flags #{:public}
+                      :name  (name (sym :state-field root))}))
+
+      `(insn/define {:name   '~(sym :state-class k)
+                     :fields ~(vec fields)}))))
+
+
+(defn- gen-app [{levels ::levels :as graph}]
+  `(fn [~'graph]
+     (let [~@(gen-spec-bindings graph)]
+       ~@(gen-state-classes graph)
+       (letfn [~@(for [level-key levels :let [{root-of ::root-of} (graph level-key)]
+                       [n root] root-of :when (= n root)]
+                   (gen-root-fn graph level-key root))
+               ~@(for [level-key levels]
+                   (gen-level-getter graph level-key))]
+         ~(sym :root-fn [::main-level (-> graph ::main-level :main)])))))
 
 
 (defn update-app [app f & args]
@@ -422,6 +496,13 @@
 
 
 (defn compile-app [app main args]
-  (-> app
-      unwrap-app
-      (analyze main args)))
+  (let [graph (-> app unwrap-app (analyze main args))
+        factory (with-fresh-names
+                  (eval (gen-app graph)))]
+    (factory graph)))
+
+
+(defn print-code [app main args]
+  (let [graph (-> app unwrap-app (analyze main args))]
+    (with-fresh-names
+      (pp/with-pprint-dispatch pp/code-dispatch (pp/pprint (gen-app graph))))))
