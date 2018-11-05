@@ -2,6 +2,7 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as st]
             [clojure.pprint :as pp]
+            [clojure.set :refer [union]]
             [insn.core :as insn])
   (:import (java.util HashSet ArrayList HashMap)))
 
@@ -46,7 +47,7 @@
                                                            :const ::value-node))))
 
 
-(defn- check [spec arg-name arg]
+(defn- check [arg spec arg-name]
   (when-not (s/valid? spec arg)
     (throw (ex-info (str "Invalid " arg-name) (s/explain-data spec arg)))))
 
@@ -78,7 +79,8 @@
                      (.contains visited k) s
                      (.contains path k) (do
                                           (.add path k)
-                                          (throw (ex-info "Cycle detected" {::graph-error :cycle ::cycle (vec path)})))
+                                          (throw (ex-info "Unsupported cycle detected"
+                                                          {::cycle (vec path)})))
                      :else (let [s (pre s k)]
                              (if (reduced? s)
                                (do
@@ -97,9 +99,11 @@
 
 
 (defn- fun-deps [{pre :pre args :args uses :uses}]
-  (concat pre (filter #(not= % :eval) args) (when (and (seq uses)
-                                                       (some #{:eval} args))
-                                              uses)))
+  (concat pre
+          (filter #(not= % :eval) args)
+          (when (and (seq uses)
+                     (some #{:eval} args))
+            uses)))
 
 
 (defn- derive-level-list [graph]
@@ -119,9 +123,14 @@
                               [])))
 
 
+(defn- set-seeds [graph level-key]
+  (update graph level-key #(assoc % ::seeds (set (:args %)))))
+
+
 (defn- dependencies [graph k]
   (let [node (graph k)]
     (cond
+      (nil? node) nil
       (fun? node) (fun-deps node)
       (const? node) nil
       (level? node) (::deps node)
@@ -129,8 +138,7 @@
 
 
 (defn- derive-level-nodes-and-deps [graph level-key]
-  (let [{main :main args :args} (graph level-key)
-        seeds (set args)
+  (let [{main :main seeds ::seeds} (graph level-key)
         nodes (walk-dag graph
                         main
                         dependencies
@@ -155,6 +163,56 @@
                        pass
                        #{})]
     (update graph level-key assoc ::nodes nodes ::deps deps)))
+
+
+(defn- check-all-required-nodes-are-defined [graph]
+  (let [deps (-> graph ::main-level ::deps)]
+    (when (seq deps)
+      (throw (ex-info "Not all nodes are defined"
+                      {::undefined-nodes deps}))))
+  graph)
+
+
+(defn- replace-levels [graph f]
+  (let [levels (::levels graph)
+        m (reduce (fn [m k]
+                    (if-let [rep (f (graph k))]
+                      (assoc m k rep)
+                      m))
+                  {}
+                  levels)]
+    (if (seq m)
+      (-> graph (merge m) (assoc ::levels (filterv m levels)))
+      graph)))
+
+
+(defn- last-index-of [x coll]
+  (last (keep-indexed (fn [i item]
+                        (when (= item x)
+                          i))
+                      coll)))
+
+
+(defn- replace-levels-with-seeded-main [{main :main args :args}]
+  (when-let [idx (last-index-of main args)]
+    {:value (eval
+              `(fn [~@(map #(if (= % idx) 'x '_)
+                           (range (count args)))]
+                 ~'x))}))
+
+
+(defn- replace-ambiguous-constants-with-fns [graph]
+  (let [seeds (reduce (fn [seeds k]
+                        (union seeds (::seeds (graph k))))
+                      #{}
+                      (::levels graph))]
+    (reduce (fn [g [k n]]
+              (if (and (const? n) (seeds k))
+                (let [v (:value n)]
+                  (assoc g k {:fn (fn [] v)}))
+                g))
+            graph
+            graph)))
 
 
 (defn- derive-level-roots-and-shared-nodes [graph level-key]
@@ -239,13 +297,17 @@
 
 
 (defn- analyze [graph main args]
-  (check ::graph "graph" graph)
-  (check non-reserved-keyword "main argument" main)
-  (check (s/coll-of non-reserved-keyword :kind vector?) "args" args)
+  (check graph ::graph "graph")
+  (check main non-reserved-keyword "main argument")
+  (check args (s/coll-of non-reserved-keyword :kind vector?) "args")
   (-> graph
       (assoc ::main-level {:main main :args args})
       derive-level-list
+      (replace-levels replace-levels-with-seeded-main)
+      (reduce-levels set-seeds)
       (reduce-levels derive-level-nodes-and-deps)
+      check-all-required-nodes-are-defined
+      replace-ambiguous-constants-with-fns
       (reduce-levels derive-level-roots-and-shared-nodes)))
 
 
