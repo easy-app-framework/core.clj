@@ -9,9 +9,51 @@
 (set! *warn-on-reflection* true)
 
 
-(defn level? [obj] (contains? obj :main))
-(defn fun?   [obj] (contains? obj :fn))
-(defn const? [obj] (contains? obj :value))
+(def ^:private non-reserved-keyword
+  (s/and keyword? #(not= % :eval)))
+
+
+(s/def :dar.container.fun-node/fn ifn?)
+(s/def :dar.container.fun-node/args (s/coll-of keyword? :kind vector?))
+(s/def :dar.container.fun-node/lazy (s/coll-of non-reserved-keyword :kind set?))
+(s/def :dar.container.fun-node/pre (s/coll-of non-reserved-keyword :kind vector?))
+(s/def :dar.container.fun-node/uses (s/coll-of non-reserved-keyword :kind set?))
+(s/def ::fun-node (s/keys :req-un [:dar.container.fun-node/fn]
+                          :opt-un [:dar.container.fun-node/pre
+                                   :dar.container.fun-node/args
+                                   :dar.container.fun-node/lazy
+                                   :dar.container.fun-node/uses]))
+
+
+(s/def :dar.container.level-node/main non-reserved-keyword)
+(s/def :dar.container.level-node/args (s/coll-of non-reserved-keyword :kind vector?))
+(s/def ::level-node (s/keys :req-un [:dar.container.level-node/main]
+                            :opt-un [:dar.container.level-node/args]))
+
+
+(s/def :dar.container.value-node/value any?)
+(s/def ::value-node (s/keys :req-un [:dar.container.value-node/value]))
+
+
+(defn- unambiguous? [node]
+  (< (count (select-keys node [:fn :main :value]))
+     2))
+
+
+(s/def ::graph (s/map-of non-reserved-keyword (s/and map? unambiguous?
+                                                     (s/or :fun   ::fun-node
+                                                           :level ::level-node
+                                                           :const ::value-node))))
+
+
+(defn- check [spec arg-name arg]
+  (when-not (s/valid? spec arg)
+    (throw (ex-info (str "Invalid " arg-name) (s/explain-data spec arg)))))
+
+
+(defn- level? [obj] (contains? obj :main))
+(defn- fun?   [obj] (contains? obj :fn))
+(defn- const? [obj] (contains? obj :value))
 
 
 (defn- walk-dag [graph main children pre post s]
@@ -197,6 +239,9 @@
 
 
 (defn- analyze [graph main args]
+  (check ::graph "graph" graph)
+  (check non-reserved-keyword "main argument" main)
+  (check (s/coll-of non-reserved-keyword :kind vector?) "args" args)
   (-> graph
       (assoc ::main-level {:main main :args args})
       derive-level-list
@@ -213,18 +258,19 @@
   `(binding [*names* (new HashSet)
              *bindings* (new HashMap)
              *package* (gensym "dar.container.state")]
-     (.add *names* 'state)
-     (.add *names* 'k)
-     (.add *names* 'parent)
-     (.add *names* 'graph)
+     (.add *names* "state")
+     (.add *names* "k")
+     (.add *names* "parent")
+     (.add *names* "graph")
      ~@body))
 
 
 (defn- gen-name [kind k]
   (let [n (if (vector? k)
-            (st/join "-" k)
+            (st/join "--" k)
             (str k))
-        n (-> n (st/replace "." "-") (st/replace "/" "-") (st/replace ":" ""))]
+        n (-> n (st/replace "." "-") (st/replace "/" "-") (st/replace ":" ""))
+        parts (st/split n (re-pattern "-"))]
     (case kind
       :val n
       :lazy (str "lazy--" n)
@@ -232,16 +278,21 @@
       :root-fn (str "rfn--" n)
       :level-getter (str n "--get")
       :uses (str "uses--" n)
-      :state-class (str *package* "." (apply str (map st/capitalize (st/split n (re-pattern "-"))))
-                        "State")
-      :state-field (let [parts (st/split n (re-pattern "-"))]
-                     (apply str (first parts) (map st/capitalize (next parts))))
-      :state-field-ready (apply str "isReady" (map st/capitalize (st/split n (re-pattern "-"))))
+      :state-class (str *package* "." (apply str (map st/capitalize parts)) "State")
+      :state-field (apply str (first parts) (map st/capitalize (next parts)))
+      :state-field-ready (apply str "isReady" (map st/capitalize parts))
       (throw (IllegalArgumentException. (str "Unknown kind " k))))))
 
 
 (defn- sym [kind k]
-  (symbol (gen-name kind k)))
+  (if-let [s (.get *bindings* [kind k])]
+    s
+    (let [name (gen-name kind k)
+          s (if (.contains *names* name)
+              (gensym name)
+              (symbol name))]
+      (.put *bindings* [kind k] s)
+      s)))
 
 
 (defn- debug [x]
@@ -505,4 +556,5 @@
 (defn print-code [app main args]
   (let [graph (-> app unwrap-app (analyze main args))]
     (with-fresh-names
-      (pp/with-pprint-dispatch pp/code-dispatch (pp/pprint (gen-app graph))))))
+      (pp/with-pprint-dispatch pp/code-dispatch (pp/pprint
+                                                  (gen-app graph))))))
