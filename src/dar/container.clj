@@ -4,7 +4,8 @@
             [clojure.pprint :as pp]
             [clojure.set :refer [union]]
             [insn.core :as insn])
-  (:import (java.util HashSet ArrayList HashMap)))
+  (:import (java.util HashSet ArrayList HashMap)
+           (clojure.lang RT)))
 
 
 (set! *warn-on-reflection* true)
@@ -447,7 +448,7 @@
       s)))
 
 
-(defn- debug [x]
+(defn debug [x]
   (println x)
   x)
 
@@ -595,7 +596,6 @@
 
 (defn- gen-level-getter [graph level-key]
   (let [{main :main root-of ::root-of level-deps ::deps shared ::shared nodes ::nodes} (graph level-key)
-        _ (debug root-of)
         cases (reduce (fn [cases k]
                         (let [conj-exp (fn [exp]
                                          (conj (conj cases k) exp))]
@@ -668,23 +668,24 @@
 
       (doseq [f shared]
         (.add fields {:flags #{:public :volatile}
-                      :name  (name (sym :state-field f))}))
+                      :name  (name (sym :state-field f))
+                      :type  Object}))
 
       (doseq [[n root] root-of :when (and (= n root) (not= root main))]
         (.add fields {:flags #{:public :volatile}
                       :name  (name (sym :state-field-ready root))
                       :type  :boolean})
         (.add fields {:flags #{:public}
-                      :name  (name (sym :state-field root))}))
+                      :name  (name (sym :state-field root))
+                      :type  Object}))
 
-      `(insn/define {:name   '~(sym :state-class level-key)
-                     :fields ~(vec fields)}))))
+      {:name   (sym :state-class level-key)
+       :fields (vec fields)})))
 
 
 (defn- gen-app [{levels ::levels :as graph}]
   `(fn [~'graph]
      (let [~@(gen-spec-bindings graph)]
-       ~@(gen-state-classes graph)
        (letfn [~@(for [level-key levels :let [{root-of ::root-of} (graph level-key)]
                        [n root] root-of :when (= n root)]
                    (gen-root-fn graph level-key root))
@@ -720,6 +721,9 @@
 (defn compile-app [app main args]
   (let [graph (-> app unwrap-app (analyze main args))
         factory (with-fresh-names
+                  (let [loader (RT/makeClassLoader)]
+                    (doseq [c (gen-state-classes graph)]
+                      (insn/define loader c)))
                   (eval (gen-app graph)))]
     (factory graph)))
 
@@ -728,4 +732,8 @@
   (let [graph (-> app unwrap-app (analyze main args))]
     (with-fresh-names
       (pp/with-pprint-dispatch pp/code-dispatch (pp/pprint
-                                                  (gen-app graph))))))
+                                                  `(do
+                                                     ~@(map (fn [c]
+                                                              `(insn/define ~c))
+                                                            (gen-state-classes graph))
+                                                     ~(gen-app graph)))))))

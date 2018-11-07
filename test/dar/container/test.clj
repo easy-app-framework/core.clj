@@ -3,6 +3,9 @@
             [dar.container :refer :all :as c]))
 
 
+(def analyze @#'dar.container/analyze)
+
+
 (def abc-app (-> {}
                  (define :ab
                    :args [:a :b]
@@ -29,16 +32,15 @@
 
                             (define :ab-ac
                               :args [:ab :ac]
-                              :fn -)
+                              :fn +)
 
                             (define-level :foo :ab-ac [:b])
 
                             (define :main
                               :args [:foo]
-                              :fn (fn [foo] (foo 5)))))
-
-
-(def analyze @#'dar.container/analyze)
+                              :fn (fn [foo]
+                                    (+ (foo 5)
+                                       (foo 1))))))
 
 
 (deftest ana-abc-app
@@ -62,6 +64,45 @@
                                               :ac   :ac
                                               :a    :a}))
     (is (= (-> g ::c/main-level ::c/shared) #{}))))
+
+
+(defn assert-trace [app main args values expected-trace]
+  (let [trace (atom [])
+        app (unwrap-app app)
+        app (reduce-kv (fn [g k node]
+                         (if-let [f (:fn node)]
+                           (assoc g k (assoc node :fn (fn [& args]
+                                                        (let [ret (apply f args)]
+                                                          (swap! trace conj (apply vector k ret (map (fn [a]
+                                                                                                       (if (fn? a) :fn a))
+                                                                                                     args)))
+                                                          ret))))
+                           g))
+                       app
+                       app)
+        app (compile-app app main args)
+        ret (apply app values)]
+    (swap! trace conj ret)
+    (is (= @trace expected-trace))))
+
+
+(deftest abc-trace
+  (assert-trace abc-app :abc [:a :b :c] [1 2 3]
+    [[:ab 3 1 2]
+     [:abc 6 3 3]
+     6]))
+
+
+(deftest simple-2-level-app-trace
+  (assert-trace simple-2-level-app :main [] []
+    [[:a 1]
+     [:ab 6 1 5]
+     [:ac 3 1 2]
+     [:ab-ac 9 6 3]
+     [:ab 2 1 1]
+     [:ab-ac 5 2 3]
+     [:main 14 :fn]
+     14]))
 
 
 (defn -main []
