@@ -410,7 +410,7 @@
 (defmacro ^:private with-fresh-names [& body]
   `(binding [*names* (new HashSet)
              *bindings* (new HashMap)
-             *package* (gensym "dar.container.state")]
+             *package* (gensym "dar.container.app")]
      (.add *names* "state")
      (.add *names* "k")
      (.add *names* "parent")
@@ -431,7 +431,11 @@
       :root-fn (str "rfn--" n)
       :level-getter (str n "--get")
       :uses (str "uses--" n)
-      :state-class (str *package* "." (apply str (map st/capitalize parts)) "State")
+      :state-class (str *package* "."
+                        (if (= k ::main-level)
+                          "MainLevel"
+                          (apply str (map st/capitalize parts)))
+                        "State")
       :state-field (apply str (first parts) (map st/capitalize (next parts)))
       :state-field-ready (apply str "isReady" (map st/capitalize parts))
       (throw (IllegalArgumentException. (str "Unknown kind " k))))))
@@ -618,7 +622,7 @@
                             :else cases)))
                       []
                       (sort nodes))]
-    `(~(sym :level-getter level-key) [~'state ~'k]
+    `(~(sym :level-getter level-key) [~(vary-meta 'state assoc :tag (sym :state-class level-key)) ~'k]
        (case ~'k
          ~@cases
          ~(if (seq level-deps)
