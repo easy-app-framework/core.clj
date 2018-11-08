@@ -71,12 +71,18 @@
         app (unwrap-app app)
         app (reduce-kv (fn [g k node]
                          (if-let [f (:fn node)]
-                           (assoc g k (assoc node :fn (fn [& args]
+                           (let [node (assoc node :fn (fn [& args]
                                                         (let [ret (apply f args)]
                                                           (swap! trace conj (apply vector k ret (map (fn [a]
                                                                                                        (if (fn? a) :fn a))
                                                                                                      args)))
-                                                          ret))))
+                                                          ret)))
+                                 node (if-let [close (:close node)]
+                                        (assoc node :close (fn [x]
+                                                             (swap! trace conj [:close k x])
+                                                             (close x)))
+                                        node)]
+                             (assoc g k node))
                            g))
                        app
                        app)
@@ -103,6 +109,30 @@
      [:ab-ac 5 2 3]
      [:main 14 :fn]
      14]))
+
+
+(deftest local-closables
+  (let [app (-> {}
+                (define :A
+                  :fn (constantly 1)
+                  :close identity)
+
+                (define :Ab
+                  :args [:A :b]
+                  :fn +
+                  :close identity)
+
+                (define :Abc
+                  :args [:Ab :c]
+                  :fn +
+                  :close identity))]
+    (assert-trace app :Abc [:b :c] [1 2]
+      [[:A 1]
+       [:Ab 2 1 1]
+       [:Abc 4 2 2]
+       [:close :Ab 2]
+       [:close :A 1]
+       4])))
 
 
 (defn -main []

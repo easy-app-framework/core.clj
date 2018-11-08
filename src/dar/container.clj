@@ -20,11 +20,13 @@
 (s/def :dar.container.fun-node/lazy (s/coll-of non-reserved-keyword :kind set?))
 (s/def :dar.container.fun-node/pre (s/coll-of non-reserved-keyword :kind vector?))
 (s/def :dar.container.fun-node/uses (s/coll-of non-reserved-keyword :kind set?))
+(s/def :dar.container.fun-node/close ifn?)
 (s/def ::fun-node (s/keys :req-un [:dar.container.fun-node/fn]
                           :opt-un [:dar.container.fun-node/pre
                                    :dar.container.fun-node/args
                                    :dar.container.fun-node/lazy
-                                   :dar.container.fun-node/uses]))
+                                   :dar.container.fun-node/uses
+                                   :dar.container.fun-node/close]))
 
 
 (s/def :dar.container.level-node/main non-reserved-keyword)
@@ -418,43 +420,37 @@
      ~@body))
 
 
-(defn- gen-name [kind k]
-  (let [n (if (vector? k)
-            (st/join "--" k)
-            (str k))
-        n (-> n (st/replace "." "-") (st/replace "/" "-") (st/replace ":" ""))
-        parts (st/split n (re-pattern "-"))]
-    (case kind
-      :val n
-      :lazy (str "lazy--" n)
-      :fn (str "fn--" n)
-      :root-fn (str "rfn--" n)
-      :level-getter (str n "--get")
-      :uses (str "uses--" n)
-      :state-class (str *package* "."
-                        (if (= k ::main-level)
-                          "MainLevel"
-                          (apply str (map st/capitalize parts)))
-                        "State")
-      :state-field (apply str (first parts) (map st/capitalize (next parts)))
-      :state-field-ready (apply str "isReady" (map st/capitalize parts))
-      (throw (IllegalArgumentException. (str "Unknown kind " k))))))
+(defn- name-parts [n]
+  (st/split (str n) (re-pattern "-")))
 
 
 (defn- sym [kind k]
   (if-let [s (.get *bindings* [kind k])]
     s
-    (let [name (gen-name kind k)
-          s (if (.contains *names* name)
-              (gensym name)
-              (symbol name))]
+    (let [n (case kind
+              :val (-> (str k) (st/replace ":" "") (st/replace "." "-") (st/replace "/" "-"))
+              :lazy (str "lazy--" (sym :val k))
+              :fn (str "fn--" (sym :val k))
+              :uses (str "uses--" (sym :val k))
+              :close (str "close--" (sym :val k))
+              :level-getter (str (sym :val k) "--get")
+              :root-fn (str "rfn--" (sym :val (first k)) "--" (sym :val (second k)))
+              :state-class (str *package* "."
+                                (if (= k ::main-level)
+                                  "MainLevel"
+                                  (apply str (map st/capitalize (name-parts (sym :val k)))))
+                                "State")
+              :state-field (let [parts (name-parts (sym :val k))]
+                             (apply str (first parts) (map st/capitalize (next parts))))
+              :state-field-ready (apply str "isReady" (map st/capitalize (name-parts (sym :val k))))
+              (throw (IllegalArgumentException. (str "Unknown kind " kind))))
+
+          s (if (.contains *names* n)
+              (gensym n)
+              (symbol n))]
+
       (.put *bindings* [kind k] s)
       s)))
-
-
-(defn debug [x]
-  (println x)
-  x)
 
 
 (defn- gen-level-exp [parent-key level-key {level-args :args deps ::deps main :main}]
@@ -468,8 +464,53 @@
          ~@args))))
 
 
+(defn- state-closables [graph {root-of ::root-of shared ::shared main :main seeds ::seeds}]
+  (set (concat (filter (fn [k]
+                         (and (not= k main)
+                              (:close (graph k)) ))
+                       (vals root-of))
+               (filter (fn [k]
+                         (and (not= (root-of k) main)
+                              (not (seeds k))
+                              (:close (graph k))))
+                       shared))))
+
+
+(defn- gen-close-state-exp
+  ([k]
+   `(when (. ~'state ~(sym :state-field k))
+      (~(sym :close k) (. ~'state ~(sym :state-field k)))))
+  ([k1 k2 & ks]
+   `(try
+      ~(gen-close-state-exp k1)
+      (finally
+        ~(apply gen-close-state-exp k2 ks)))))
+
+
+(defn- gen-close-state-fn [graph level-key {main :main nodes ::nodes} closables]
+  `(fn [~(vary-meta 'state assoc :tag (sym :state-class level-key))]
+     ~(apply gen-close-state-exp (filter closables
+                                         (walk-dag graph
+                                                   main
+                                                   dependencies
+                                                   (fn pre [s k]
+                                                     (if (nodes k)
+                                                       s
+                                                       (reduced s)))
+                                                   conj
+                                                   [])))))
+
+
+(defmacro let-closable [close [n exp] & body]
+  `(let [~n ~exp]
+     (try
+       ~@body
+       (finally
+         (~close ~n)))))
+
+
 (defn- gen-root-fn [graph level-key root]
-  (let [{root-of ::root-of nodes ::nodes shared ::shared main :main args :args seeds ::seeds level-deps ::deps} (graph level-key)
+  (let [{root-of ::root-of nodes ::nodes shared ::shared main :main args :args seeds ::seeds level-deps ::deps :as level} (graph level-key)
 
         gen-fun-app (fn [k {args :args lazy :lazy}]
                       `(~(sym :fn k) ~@(map (fn [arg]
@@ -482,53 +523,62 @@
                                                 :else (sym :val arg)))
                                             args)))
 
-        gen-name-exp-pair (fn [k lazy?]
-                            (let [node (graph k)
-                                  val-sym (fn []
-                                            (sym (if lazy? :lazy :val) k))
-                                  wrap-if-lazy (fn [exp]
-                                                 (if lazy?
-                                                   `(fn [] ~exp)
-                                                   exp))]
-                              (cond
-                                (= k ::state) (do
-                                                (assert (= root main))
-                                                ['state `(let [s# (new ~(sym :state-class level-key))]
-                                                           ~@(when (seq level-deps)
-                                                               [`(set! (. s# ~'parent) ~'parent)])
-                                                           ~@(map (fn [a]
-                                                                    `(set! (. s# ~(sym :state-field a)) ~(sym :val a)))
-                                                                  (filter shared args))
-                                                           s#)])
+        gen-name-exp-binding (fn [k lazy?]
+                               (let [node (graph k)
+                                     val-sym (fn []
+                                               (sym (if lazy? :lazy :val) k))
+                                     wrap-if-lazy (fn [exp]
+                                                    (if lazy?
+                                                      `(fn [] ~exp)
+                                                      exp))]
+                                 (cond
+                                   (= k ::state) (let [_ (assert (= root main))
+                                                       b ['state `(let [~'state (new ~(sym :state-class level-key))]
+                                                                    ~@(when (seq level-deps)
+                                                                        [`(set! (. ~'state ~'parent) ~'parent)])
+                                                                    ~@(map (fn [a]
+                                                                             `(set! (. ~'state ~(sym :state-field a)) ~(sym :val a)))
+                                                                           (filter shared args))
+                                                                    ~'state)]]
+                                                   (if (seq (state-closables graph level))
+                                                     `(let-closable ~(sym :close level-key) ~b)
+                                                     `(let ~b)))
 
-                                (= k ::parent) (do
-                                                 (assert (not= root main))
-                                                 ['parent `(. ~'state ~'parent)])
+                                   (= k ::parent) (do
+                                                    (assert (not= root main))
+                                                    `(let [~'parent (. ~'state ~'parent)]))
 
-                                (= root (root-of k)) [(val-sym) (if lazy?
-                                                                  `(fn [] ~(sym :val k))
-                                                                  (let [exp (gen-fun-app k node)]
-                                                                    (if (shared k)
-                                                                      `(let [v# ~exp]
-                                                                         (set! (. ~'state ~(sym :state-field k)) v#)
-                                                                         v#)
-                                                                      exp)))]
+                                   (= root (root-of k)) (let [closable? (and (not lazy?)
+                                                                             (= root main)
+                                                                             (not= k main)
+                                                                             (:close node))
+                                                              b [(val-sym) (if lazy?
+                                                                             `(fn [] ~(sym :val k))
+                                                                             (let [exp (gen-fun-app k node)]
+                                                                               (if (shared k)
+                                                                                 `(let [v# ~exp]
+                                                                                    (set! (. ~'state ~(sym :state-field k)) v#)
+                                                                                    v#)
+                                                                                 exp)))]]
+                                                          (if closable?
+                                                            `(let-closable ~(sym :close k) ~b)
+                                                            `(let ~b)))
 
-                                (seeds k) [(val-sym) (wrap-if-lazy
-                                                       (if (= root main)
-                                                         (sym :val k)
-                                                         `(. ~'state ~(sym :state-field k))))]
+                                   (seeds k) `(let [~(val-sym) ~(wrap-if-lazy
+                                                                  (if (= root main)
+                                                                    (sym :val k)
+                                                                    `(. ~'state ~(sym :state-field k))))])
 
-                                (shared k) [(val-sym) (wrap-if-lazy
-                                                        `(. ~'state ~(sym :state-field k)))]
+                                   (shared k) `(let [~(val-sym) ~(wrap-if-lazy
+                                                                   `(. ~'state ~(sym :state-field k)))])
 
-                                (nodes k) [(val-sym) (wrap-if-lazy
-                                                       (if (level? node)
-                                                         (gen-level-exp level-key k node)
-                                                         `(~(sym :level-getter level-key) ~'state ~k)))]
+                                   (nodes k) `(let [~(val-sym) ~(wrap-if-lazy
+                                                                  (if (level? node)
+                                                                    (gen-level-exp level-key k node)
+                                                                    `(~(sym :level-getter level-key) ~'state ~k)))])
 
-                                :else [(val-sym) (wrap-if-lazy
-                                                   `(~'parent ~k))])))
+                                   :else `(let [~(val-sym) ~(wrap-if-lazy
+                                                              `(~'parent ~k))]))))
 
         names-seq (walk-dag graph
                             [root false]
@@ -582,8 +632,7 @@
                             nil)
 
         body (reduce (fn [inner-form [k lazy?]]
-                       `(let [~@(gen-name-exp-pair k lazy?)]
-                          ~inner-form))
+                       `(~@(gen-name-exp-binding k lazy?) ~inner-form))
                      (sym :val root)
                      names-seq)
 
@@ -647,7 +696,9 @@
                       (add (sym :fn k) `(:fn (~k ~'graph)))
                       (when (and (:uses node)
                                  (some #{:eval} (:args node)))
-                        (add (sym :uses k) `(:fn (~k ~'graph)))))
+                        (add (sym :uses k) `(:fn (~k ~'graph))))
+                      (when (:close node)
+                        (add (sym :close k) `(:close (~k ~'graph)))))
 
         (const? node) (add (sym :val k) `(:value (~k ~'graph)))))
 
@@ -690,11 +741,19 @@
 (defn- gen-app [{levels ::levels :as graph}]
   `(fn [~'graph]
      (let [~@(gen-spec-bindings graph)]
-       (letfn [~@(for [level-key levels :let [{root-of ::root-of} (graph level-key)]
-                       [n root] root-of :when (= n root)]
-                   (gen-root-fn graph level-key root))
-               ~@(for [level-key levels :when (has-state? (graph level-key))]
-                   (gen-level-getter graph level-key))]
+       (letfn [~@(let [fns (new ArrayList)
+                       add #(.add fns %)]
+                   (doseq [level-key (::levels graph) :let [level (graph level-key)]]
+                     (doseq [[n root] (::root-of level) :when (= n root)]
+                       (add (gen-root-fn graph level-key root)))
+
+                     (when (has-state? level)
+                       (add (gen-level-getter graph level-key)))
+
+                     (let [closables (state-closables graph level)]
+                       (when (seq closables)
+                         (add (gen-close-state-fn graph level-key level closables)))))
+                   fns)]
          ~(sym :root-fn [::main-level (-> graph ::main-level :main)])))))
 
 
