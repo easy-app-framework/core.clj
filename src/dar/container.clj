@@ -730,7 +730,7 @@
        :fields (vec fields)})))
 
 
-(defn- gen-app [{levels ::levels :as graph}]
+(defn- gen-app [graph]
   `(fn [~'graph]
      (let [~@(gen-spec-bindings graph)]
        (letfn [~@(let [fns (new ArrayList)
