@@ -406,6 +406,7 @@
              *package* (gensym "dar.container.app")]
      (.add *names* "state")
      (.add *names* "k")
+     (.add *names* "v")
      (.add *names* "parent")
      (.add *names* "graph")
      ~@body))
@@ -547,9 +548,9 @@
                                                                              `(fn [] ~(sym :val k))
                                                                              (let [exp (gen-fun-app k node)]
                                                                                (if (shared k)
-                                                                                 `(let [v# ~exp]
-                                                                                    (set! (. ~'state ~(sym :state-field k)) v#)
-                                                                                    v#)
+                                                                                 `(let [~'v ~exp]
+                                                                                    (set! (. ~'state ~(sym :state-field k)) ~'v)
+                                                                                    ~'v)
                                                                                  exp)))]]
                                                           (if closable?
                                                             `(let-closable ~(sym :close k) ~b)
@@ -652,10 +653,10 @@
                                                                  (locking ~'state
                                                                    (if (. ~'state ~(sym :state-field-ready k))
                                                                      (. ~'state ~(sym :state-field k))
-                                                                     (let [v# (~(sym :root-fn [level-key k]) ~'state)]
-                                                                       (set! (. ~'state ~(sym :state-field k)) v#)
+                                                                     (let [~'v (~(sym :root-fn [level-key k]) ~'state)]
+                                                                       (set! (. ~'state ~(sym :state-field k)) ~'v)
                                                                        (set! (. ~'state ~(sym :state-field-ready k)) true)
-                                                                       v#)))))
+                                                                       ~'v)))))
 
                             (level? (graph k)) (conj-exp (gen-level-exp level-key k (graph k)))
 
