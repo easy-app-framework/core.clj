@@ -446,14 +446,14 @@
 
 
 (defn- gen-level-exp [parent-key level-key {level-args :args deps ::deps main :main}]
-  (let [args (map (partial sym :val) level-args)]
-    `(fn [~@args]
-       (~(sym :root-fn [level-key main])
-         ~@(if (seq deps)
-             [`(fn [k#]
-                 (~(sym :level-getter parent-key) ~'state k#))]
-             nil)
-         ~@args))))
+  (let [args (map (partial sym :val) level-args)
+        rfn (sym :root-fn [level-key main])]
+    (if (seq deps)
+      `(fn [~@args]
+         (~rfn (fn [~'k]
+                 (~(sym :level-getter parent-key) ~'state ~'k))
+           ~@args))
+      rfn)))
 
 
 (defn- state-closables [graph {root-of ::root-of shared ::shared main :main seeds ::seeds}]
