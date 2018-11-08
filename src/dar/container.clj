@@ -133,7 +133,7 @@
 (defn- dependencies [graph k]
   (let [node (graph k)]
     (cond
-      (nil? node) nil
+      (nil? node) (throw (ex-info (str "Node " k " is not defined") {::undefined-node k}))
       (fun? node) (fun-deps node)
       (const? node) nil
       (level? node) (::deps node)
@@ -166,14 +166,6 @@
                        pass
                        #{})]
     (update graph level-key assoc ::nodes nodes ::deps deps)))
-
-
-(defn- check-all-required-nodes-are-defined [graph]
-  (let [deps (-> graph ::main-level ::deps)]
-    (when (seq deps)
-      (throw (ex-info "Not all nodes are defined"
-                      {::undefined-nodes deps}))))
-  graph)
 
 
 (defn- replace-levels [graph f]
@@ -396,7 +388,6 @@
       derive-level-list
       (reduce-levels set-seeds)
       (reduce-levels derive-level-nodes-and-deps)
-      check-all-required-nodes-are-defined
       (replace-levels replace-levels-with-seeded-main)
       (replace-levels replace-levels-with-constant-main)
       (replace-levels replace-levels-with-foreign-main)
@@ -487,14 +478,14 @@
         ~(apply gen-close-state-exp k2 ks)))))
 
 
-(defn- gen-close-state-fn [graph level-key {main :main nodes ::nodes} closables]
+(defn- gen-close-state-fn [graph level-key {main :main nodes ::nodes seeds ::seeds} closables]
   `(fn [~(vary-meta 'state assoc :tag (sym :state-class level-key))]
      ~(apply gen-close-state-exp (filter closables
                                          (walk-dag graph
                                                    main
                                                    dependencies
                                                    (fn pre [s k]
-                                                     (if (nodes k)
+                                                     (if (and (nodes k) (not (seeds k)))
                                                        s
                                                        (reduced s)))
                                                    conj
