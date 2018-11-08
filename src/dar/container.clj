@@ -214,26 +214,6 @@
     {:value (nth-arg idx (count args))}))
 
 
-(defn- constantly-n-args [^long n v]
-  (case n
-    0 (fn [] v)
-    1 (fn [_] v)
-    2 (fn [_ _] v)
-    3 (fn [_ _ _] v)
-    4 (fn [_ _ _ _] v)
-    5 (fn [_ _ _ _ _] v)
-    (fn [& args]
-      (assert (= (count args) n))
-      v)))
-
-
-(defn- replace-levels-with-constant-main [graph k {main :main args :args}]
-  (when (and (= k ::main-level)
-             (const? (graph main)))
-    {:value (constantly-n-args (count args)
-                               (:value (graph main)))}))
-
-
 (defn- lazy-n-args [^long n]
   (case n
     0 (fn [f] f)
@@ -389,7 +369,6 @@
       (reduce-levels set-seeds)
       (reduce-levels derive-level-nodes-and-deps)
       (replace-levels replace-levels-with-seeded-main)
-      (replace-levels replace-levels-with-constant-main)
       (replace-levels replace-levels-with-foreign-main)
       replace-ambiguous-constants-with-fns
       (reduce-levels derive-level-roots-and-shared-nodes)))
