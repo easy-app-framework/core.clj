@@ -1,11 +1,10 @@
 # dar.container
 
-Dependency based programming framework
+IoC programming framework.
 
 ## Credits
 
 This work was initially inspired by [The-Kiln](https://github.com/straszheimjeffrey/The-Kiln)
-
 
 ## License
 

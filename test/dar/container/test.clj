@@ -43,6 +43,17 @@
                                        (foo 1))))))
 
 
+(def complex-1-level-app
+  (-> {}
+      (define :result :args [:abcd :xy] :fn +)
+      (define :abcd :args [:b :ab] :fn +)
+      (define :ab :args [:b :a] :fn +)
+      (define :cd :args [:b :a] :fn +)
+      (define :d :args [:abcd :ab] :fn +)
+      (define :x :args [:d :cd] :fn +)
+      (define :xy :args [:abcd :x] :fn +)))
+
+
 (deftest ana-abc-app
   (let [g (analyze abc-app :abc [:a :b :c])]
     (is (= (-> g ::c/levels) [::c/main-level]))
@@ -97,6 +108,18 @@
     [[:ab 3 1 2]
      [:abc 6 3 3]
      6]))
+
+
+(deftest complex-1-level-app-trace
+  (assert-trace complex-1-level-app :result [:a :b] [1 1]
+    [[:ab 2 1 1]
+     [:abcd 3 1 2]
+     [:d 5 3 2]
+     [:cd 2 1 1]
+     [:x 7 5 2]
+     [:xy 10 3 7]
+     [:result 13 3 10]
+     13]))
 
 
 (deftest simple-2-level-app-trace
