@@ -278,14 +278,14 @@
                              (doseq [a (:args node)]
                                (if (= a :eval)
                                  (vreset! uses? true)
-                                 (when (and (nodes a)
-                                            (not (seeds a)))
-                                   (let [n (graph a)]
-                                     (cond
-                                       (fun? n) (if (contains? (:lazy node) a)
-                                                  (.add lazy a)
-                                                  (.add strict a))
-                                       (level? n) (add-shared shared (::deps n)))))))
+                                 (cond
+                                   (seeds a) (.add shared a)
+                                   (nodes a) (let [n (graph a)]
+                                               (cond
+                                                 (fun? n) (if (contains? (:lazy node) a)
+                                                            (.add lazy a)
+                                                            (.add strict a))
+                                                 (level? n) (add-shared shared (::deps n)))))))
 
                              (when @uses?
                                (add-shared (:uses node)))
@@ -349,7 +349,7 @@
             (acc-request d root :strict idx))
           (doseq [d lazy]
             (acc-request d root :lazy idx))
-          (doseq [d shared]
+          (doseq [d shared :when (not (and (= root main) (seeds d)))]
             (acc-request d root :shared idx)))))
 
     (update graph level-key assoc ::root-of @root-of ::shared @shared)))
@@ -612,7 +612,7 @@
                       (if (seq level-deps)
                         (cons 'parent args)
                         args))
-                    ['state])]
+                    [(with-meta 'state {:tag (sym :state-class level-key)})])]
 
     `(~(sym :root-fn [level-key root]) [~@arguments]
        ~body)))
@@ -642,7 +642,7 @@
                             :else cases)))
                       []
                       (sort nodes))]
-    `(~(sym :level-getter level-key) [~(vary-meta 'state assoc :tag (sym :state-class level-key)) ~'k]
+    `(~(sym :level-getter level-key) [~(with-meta 'state {:tag (sym :state-class level-key)}) ~'k]
        (case ~'k
          ~@cases
          ~(if (seq level-deps)

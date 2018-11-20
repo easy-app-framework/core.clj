@@ -1,6 +1,10 @@
 (ns dar.container.test
   (:require [clojure.test :refer :all]
+            [clojure.pprint :as pp]
             [dar.container :refer :all :as c]))
+
+
+(set! *warn-on-reflection* true)
 
 
 (def analyze @#'dar.container/analyze)
@@ -156,6 +160,56 @@
        [:close :Ab 2]
        [:close :A 1]
        4])))
+
+
+(deftest local-dummy-lazy
+  (let [app (-> {}
+                (define :a
+                  :fn (constantly 1))
+
+                (define :ab
+                  :args [:a :b]
+                  :fn +)
+
+                (define :aba
+                  :args [:a :ab]
+                  :lazy #{:a}
+                  :fn (fn [a ab]
+                        (+ ab (a)))))]
+    (assert-trace app :aba [:b] [3]
+      [[:a 1]
+       [:ab 4 1 3]
+       [:aba 5 :fn 4]
+       5])))
+
+
+(deftest local-shared-lazy
+  (let [nothing (-> {}
+                    (define :a
+                      :fn (constantly 1))
+
+                    (define :ab
+                      :args [:a :b]
+                      :fn +)
+
+                    (define :aba
+                      :args [:a :ab]
+                      :lazy #{:a :ab}
+                      :fn (fn [a ab]
+                            1)))
+
+        something (assoc-in nothing [:aba :fn] (fn [a ab]
+                                                 (+ (ab) (a) (ab) (a))))]
+
+    (assert-trace nothing :aba [:b] [1]
+      [[:aba 1 :fn :fn]
+       1])
+
+    (assert-trace something :aba [:b] [1]
+      [[:a 1]
+       [:ab 2 1 1]
+       [:aba 6 :fn :fn]
+       6])))
 
 
 (defn -main []
