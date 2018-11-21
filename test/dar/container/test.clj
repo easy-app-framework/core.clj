@@ -212,5 +212,24 @@
        6])))
 
 
+(deftest strict-shared
+  (let [app (-> {}
+                (define :a :fn (fn [] 1))
+                (define :ab
+                  :args [:a :b]
+                  :fn +)
+                (define-level :fab :ab [:b])
+                (define :main
+                  :args [:fab :a]
+                  :fn (fn [fab a]
+                        (+ a (fab 2) (fab 3)))))]
+    (assert-trace app :main [] []
+      [[:a 1]
+       [:ab 3 1 2]
+       [:ab 4 1 3]
+       [:main 8 :fn 1]
+       8])))
+
+
 (defn -main []
   (run-tests 'dar.container.test))
