@@ -1,4 +1,4 @@
-(ns dar.container
+(ns ea.core
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as st]
             [clojure.pprint :as pp]
@@ -15,28 +15,28 @@
   (s/and keyword? #(not= % :eval)))
 
 
-(s/def :dar.container.fun-node/fn ifn?)
-(s/def :dar.container.fun-node/args (s/coll-of keyword? :kind vector?))
-(s/def :dar.container.fun-node/lazy (s/coll-of non-reserved-keyword :kind set?))
-(s/def :dar.container.fun-node/pre (s/coll-of non-reserved-keyword :kind vector?))
-(s/def :dar.container.fun-node/uses (s/coll-of non-reserved-keyword :kind set?))
-(s/def :dar.container.fun-node/close ifn?)
-(s/def ::fun-node (s/keys :req-un [:dar.container.fun-node/fn]
-                          :opt-un [:dar.container.fun-node/pre
-                                   :dar.container.fun-node/args
-                                   :dar.container.fun-node/lazy
-                                   :dar.container.fun-node/uses
-                                   :dar.container.fun-node/close]))
+(s/def :ea.core.fun-node/fn ifn?)
+(s/def :ea.core.fun-node/args (s/coll-of keyword? :kind vector?))
+(s/def :ea.core.fun-node/lazy (s/coll-of non-reserved-keyword :kind set?))
+(s/def :ea.core.fun-node/pre (s/coll-of non-reserved-keyword :kind vector?))
+(s/def :ea.core.fun-node/uses (s/coll-of non-reserved-keyword :kind set?))
+(s/def :ea.core.fun-node/close ifn?)
+(s/def ::fun-node (s/keys :req-un [:ea.core.fun-node/fn]
+                          :opt-un [:ea.core.fun-node/pre
+                                   :ea.core.fun-node/args
+                                   :ea.core.fun-node/lazy
+                                   :ea.core.fun-node/uses
+                                   :ea.core.fun-node/close]))
 
 
-(s/def :dar.container.level-node/main non-reserved-keyword)
-(s/def :dar.container.level-node/args (s/coll-of non-reserved-keyword :kind vector?))
-(s/def ::level-node (s/keys :req-un [:dar.container.level-node/main]
-                            :opt-un [:dar.container.level-node/args]))
+(s/def :ea.core.level-node/main non-reserved-keyword)
+(s/def :ea.core.level-node/args (s/coll-of non-reserved-keyword :kind vector?))
+(s/def ::level-node (s/keys :req-un [:ea.core.level-node/main]
+                            :opt-un [:ea.core.level-node/args]))
 
 
-(s/def :dar.container.value-node/value any?)
-(s/def ::value-node (s/keys :req-un [:dar.container.value-node/value]))
+(s/def :ea.core.value-node/value any?)
+(s/def ::value-node (s/keys :req-un [:ea.core.value-node/value]))
 
 
 (defn- unambiguous? [node]
@@ -45,7 +45,7 @@
 
 
 (s/def ::graph (s/map-of non-reserved-keyword (s/and map? unambiguous?
-                                                     (s/or :fun   ::fun-node
+                                                     (s/or :fun ::fun-node
                                                            :level ::level-node
                                                            :const ::value-node))))
 
@@ -55,8 +55,8 @@
     (throw (ex-info (str "Invalid " arg-name) (s/explain-data spec arg)))))
 
 
+(defn- fun? [obj] (contains? obj :fn))
 (defn- level? [obj] (contains? obj :main))
-(defn- fun?   [obj] (contains? obj :fn))
 (defn- const? [obj] (contains? obj :value))
 
 
@@ -235,7 +235,7 @@
 
 (defn- replace-levels-with-foreign-main [graph k {main :main nodes ::nodes args :args}]
   (when-not (nodes main)
-    {:fn (lazy-n-args (count args))
+    {:fn   (lazy-n-args (count args))
      :args [main]
      :lazy #{main}}))
 
@@ -438,7 +438,7 @@
 (defn- state-closables [graph {root-of ::root-of shared ::shared main :main seeds ::seeds}]
   (set (concat (filter (fn [k]
                          (and (not= k main)
-                              (:close (graph k)) ))
+                              (:close (graph k))))
                        (vals root-of))
                (filter (fn [k]
                          (and (not= (root-of k) main)

@@ -1,13 +1,13 @@
-(ns dar.container.test
+(ns ea.core.test
   (:require [clojure.test :refer :all]
             [clojure.pprint :as pp]
-            [dar.container :refer :all :as c]))
+            [ea.core :refer :all :as c]))
 
 
 (set! *warn-on-reflection* true)
 
 
-(def analyze @#'dar.container/analyze)
+(def analyze @#'ea.core/analyze)
 
 
 (def abc-app (-> {}
@@ -232,4 +232,4 @@
 
 
 (defn -main []
-  (run-tests 'dar.container.test))
+  (run-tests 'ea.core.test))
