@@ -231,5 +231,22 @@
        8])))
 
 
+(deftest level-with-no-dependencies
+  (let [app (-> {}
+                (define :ab
+                  :args [:a :b]
+                  :fn +)
+                (define-level :ab-fn :ab [:a :b])
+                (define :main
+                  :args [:ab-fn]
+                  :fn (fn [ab]
+                        (+ (ab 1 2) (ab 3 4)))))]
+    (assert-trace app :main [] []
+      [[:ab 3 1 2]
+       [:ab 7 3 4]
+       [:main 10 :fn]
+       10])))
+
+
 (defn -main []
   (run-tests 'ea.core.test))

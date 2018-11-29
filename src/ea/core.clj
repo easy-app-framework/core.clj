@@ -60,6 +60,11 @@
 (defn- const? [obj] (contains? obj :value))
 
 
+(defn- debug [x]
+  (println x)
+  x)
+
+
 (defn- walk-dag [graph main children pre post s]
   (let [visited (new HashSet)
         traverse (fn traverse [s k]
@@ -548,6 +553,9 @@
                                                                     (gen-level-exp level-key k node)
                                                                     `(~(sym :level-getter level-key) ~'state ~k)))])
 
+                                   (and (level? node) (empty? (::deps node))) ~(wrap-if-lazy
+                                                                                 (gen-level-exp level-key k node))
+
                                    :else `(let [~(val-sym) ~(wrap-if-lazy
                                                               `(~'parent ~k))]))))
 
@@ -592,7 +600,9 @@
 
                                       (concat strict deferred)))
 
-                                  (and (= root main) (nodes k)) [[::state]]
+                                  (and (= root main) (nodes k)
+                                       (not (and (level? node)
+                                                 (empty? (::deps node))))) [[::state]]
 
                                   (and (not= root main) (not (nodes k))) [[::parent]]
 
